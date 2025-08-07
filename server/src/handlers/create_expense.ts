@@ -1,19 +1,44 @@
 
+import { db } from '../db';
+import { expensesTable, usersTable } from '../db/schema';
 import { type CreateExpenseInput, type Expense } from '../schema';
+import { eq } from 'drizzle-orm';
 
 export const createExpense = async (input: CreateExpenseInput): Promise<Expense> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is creating a new expense record and persisting it in the database.
-  // Should validate that the creating user exists and has appropriate permissions
-  return Promise.resolve({
-    id: 0, // Placeholder ID
-    category: input.category,
-    description: input.description,
-    amount: input.amount,
-    expense_date: input.expense_date,
-    receipt_url: input.receipt_url,
-    notes: input.notes,
-    created_by: input.created_by,
-    created_at: new Date(),
-  } as Expense);
+  try {
+    // Validate that the creating user exists
+    const user = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, input.created_by))
+      .execute();
+
+    if (user.length === 0) {
+      throw new Error(`User with ID ${input.created_by} not found`);
+    }
+
+    // Insert expense record
+    const result = await db.insert(expensesTable)
+      .values({
+        category: input.category,
+        description: input.description,
+        amount: input.amount.toString(), // Convert number to string for numeric column
+        expense_date: input.expense_date.toISOString().split('T')[0], // Convert Date to YYYY-MM-DD string
+        receipt_url: input.receipt_url,
+        notes: input.notes,
+        created_by: input.created_by
+      })
+      .returning()
+      .execute();
+
+    // Convert fields back to proper types before returning
+    const expense = result[0];
+    return {
+      ...expense,
+      amount: parseFloat(expense.amount), // Convert string back to number
+      expense_date: new Date(expense.expense_date) // Convert string back to Date
+    };
+  } catch (error) {
+    console.error('Expense creation failed:', error);
+    throw error;
+  }
 };

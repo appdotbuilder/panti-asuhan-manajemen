@@ -1,23 +1,46 @@
 
+import { db } from '../db';
+import { activitiesTable } from '../db/schema';
 import { type UpdateActivityInput, type Activity } from '../schema';
+import { eq } from 'drizzle-orm';
 
 export const updateActivity = async (input: UpdateActivityInput): Promise<Activity> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is updating activity information in the database.
-  // Should validate that the activity exists before updating
-  return Promise.resolve({
-    id: input.id,
-    title: input.title || 'existing_title',
-    description: input.description || null,
-    type: input.type || 'harian',
-    scheduled_date: input.scheduled_date || new Date(),
-    end_date: input.end_date || null,
-    location: input.location || null,
-    participants: input.participants || null,
-    photos: input.photos || null,
-    status: input.status || 'planned',
-    created_by: 1, // Should be from existing record
-    created_at: new Date(),
-    updated_at: new Date(),
-  } as Activity);
+  try {
+    // First verify the activity exists
+    const existing = await db.select()
+      .from(activitiesTable)
+      .where(eq(activitiesTable.id, input.id))
+      .execute();
+
+    if (existing.length === 0) {
+      throw new Error('Activity not found');
+    }
+
+    // Build update object with only provided fields
+    const updateData: any = {
+      updated_at: new Date()
+    };
+
+    if (input.title !== undefined) updateData.title = input.title;
+    if (input.description !== undefined) updateData.description = input.description;
+    if (input.type !== undefined) updateData.type = input.type;
+    if (input.scheduled_date !== undefined) updateData.scheduled_date = input.scheduled_date;
+    if (input.end_date !== undefined) updateData.end_date = input.end_date;
+    if (input.location !== undefined) updateData.location = input.location;
+    if (input.participants !== undefined) updateData.participants = input.participants;
+    if (input.photos !== undefined) updateData.photos = input.photos;
+    if (input.status !== undefined) updateData.status = input.status;
+
+    // Update the activity
+    const result = await db.update(activitiesTable)
+      .set(updateData)
+      .where(eq(activitiesTable.id, input.id))
+      .returning()
+      .execute();
+
+    return result[0];
+  } catch (error) {
+    console.error('Activity update failed:', error);
+    throw error;
+  }
 };
