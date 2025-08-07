@@ -5,7 +5,7 @@ import { type CreateChildInput, type Child } from '../schema';
 
 export const createChild = async (input: CreateChildInput): Promise<Child> => {
   try {
-    // Insert child record - convert Date to string for date column
+    // Insert child record
     const result = await db.insert(childrenTable)
       .values({
         full_name: input.full_name,
@@ -14,19 +14,16 @@ export const createChild = async (input: CreateChildInput): Promise<Child> => {
         education_status: input.education_status,
         health_history: input.health_history,
         guardian_info: input.guardian_info,
-        notes: input.notes
-        // is_active defaults to true in schema
-        // created_at defaults to now() in schema
-        // updated_at defaults to null
+        notes: input.notes,
       })
       .returning()
       .execute();
 
-    // Convert birth_date back to Date object before returning
+    // Convert birth_date string back to Date for the return type
     const child = result[0];
     return {
       ...child,
-      birth_date: new Date(child.birth_date + 'T00:00:00.000Z') // Convert string back to Date
+      birth_date: new Date(child.birth_date), // Convert string back to Date
     };
   } catch (error) {
     console.error('Child creation failed:', error);

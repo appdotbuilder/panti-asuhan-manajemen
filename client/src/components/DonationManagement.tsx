@@ -1,65 +1,45 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
-  Gift, 
-  Plus,
-  Calendar as CalendarIcon, 
+  Heart, 
+  Plus, 
+  Calendar as CalendarIcon,
   Search,
-  DollarSign,
-  Package,
-  Heart,
-  User,
-  TrendingUp
+  Filter,
+  Users,
+  Gift,
+  Zap
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { id } from 'date-fns/locale';
+import { id as localeId } from 'date-fns/locale';
 import { trpc } from '@/utils/trpc';
-import type { 
-  Donor,
-  Donation, 
-  CreateDonorInput,
-  CreateDonationInput, 
-  UserRole,
-  DonationType
-} from '../../../server/src/schema';
+import type { Donor, Donation, CreateDonorInput, CreateDonationInput, DonationType } from '../../../server/src/schema';
 
 interface DonationManagementProps {
-  currentUser: {
-    id: number;
-    full_name: string;
-    role: UserRole;
-    email: string;
-  };
+  donors: Donor[];
+  onDonationsUpdate: () => void;
+  backendStatus: 'loading' | 'connected' | 'error';
 }
 
-export function DonationManagement({ currentUser }: DonationManagementProps) {
-  const [donors, setDonors] = useState<Donor[]>([]);
+export function DonationManagement({ donors, onDonationsUpdate, backendStatus }: DonationManagementProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
+  const [isAddDonorDialogOpen, setIsAddDonorDialogOpen] = useState(false);
+  const [isAddDonationDialogOpen, setIsAddDonationDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | DonationType>('all');
-  
-  // Date range for filtering donations
-  const [startDate, setStartDate] = useState<Date>(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-  );
-  const [endDate, setEndDate] = useState<Date>(new Date());
-
-  // Dialog states
-  const [isDonorDialogOpen, setIsDonorDialogOpen] = useState(false);
-  const [isDonationDialogOpen, setIsDonationDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>('all');
 
   // Form states
   const [donorFormData, setDonorFormData] = useState<CreateDonorInput>({
@@ -80,252 +60,319 @@ export function DonationManagement({ currentUser }: DonationManagementProps) {
     notes: null,
   });
 
-  const loadDonors = useCallback(async () => {
-    try {
-      const result = await trpc.getDonors.query();
-      setDonors(result);
-    } catch (error) {
-      console.error('Failed to load donors:', error);
-    }
-  }, []);
-
+  // Load donations for current month
   const loadDonations = useCallback(async () => {
+    if (backendStatus === 'error') {
+      // Use demo donations data
+      const demoDonations: Donation[] = [
+        {
+          id: 1,
+          donor_id: 1,
+          type: 'uang',
+          amount: 5000000,
+          item_description: null,
+          item_quantity: null,
+          donation_date: new Date('2024-01-15'),
+          notes: 'Donasi rutin bulanan',
+          created_at: new Date('2024-01-15'),
+        },
+        {
+          id: 2,
+          donor_id: 2,
+          type: 'barang',
+          amount: 2000000,
+          item_description: 'Paket sembako dan pakaian',
+          item_quantity: 10,
+          donation_date: new Date('2024-01-20'),
+          notes: 'Paket sembako untuk 10 keluarga',
+          created_at: new Date('2024-01-20'),
+        },
+        {
+          id: 3,
+          donor_id: 3,
+          type: 'uang',
+          amount: 8750000,
+          item_description: null,
+          item_quantity: null,
+          donation_date: new Date('2024-01-25'),
+          notes: 'Donasi CSR perusahaan',
+          created_at: new Date('2024-01-25'),
+        },
+      ];
+      setDonations(demoDonations);
+      return;
+    }
+
     try {
-      setIsLoading(true);
-      const result = await trpc.getDonationsByDateRange.query({
-        start_date: startDate,
-        end_date: endDate,
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      
+      const endOfMonth = new Date();
+      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+      endOfMonth.setDate(0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      const donationsData = await trpc.getDonationsByDateRange.query({
+        start_date: startOfMonth,
+        end_date: endOfMonth,
       });
-      setDonations(result);
+
+      setDonations(donationsData);
     } catch (error) {
       console.error('Failed to load donations:', error);
-    } finally {
-      setIsLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [backendStatus]);
 
   useEffect(() => {
-    loadDonors();
     loadDonations();
-  }, [loadDonors, loadDonations]);
+  }, [loadDonations]);
 
-  // Filter donations
-  const filteredDonations = donations.filter(donation => {
+  // Reset forms
+  const resetDonorForm = useCallback(() => {
+    setDonorFormData({
+      full_name: '',
+      email: null,
+      phone: null,
+      address: null,
+      user_id: null,
+    });
+  }, []);
+
+  const resetDonationForm = useCallback(() => {
+    setDonationFormData({
+      donor_id: 0,
+      type: 'uang',
+      amount: null,
+      item_description: null,
+      item_quantity: null,
+      donation_date: new Date(),
+      notes: null,
+    });
+  }, []);
+
+  // Filter donors and donations
+  const filteredDonors = donors.filter((donor: Donor) =>
+    donor.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (donor.email && donor.email.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  const filteredDonations = donations.filter((donation: Donation) => {
     const donor = donors.find(d => d.id === donation.donor_id);
-    const matchesSearch = donor?.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || false;
+    const matchesSearch = !searchTerm || (donor && donor.full_name.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = typeFilter === 'all' || donation.type === typeFilter;
     
     return matchesSearch && matchesType;
   });
 
+  // Handle create donor
   const handleCreateDonor = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (backendStatus === 'error') {
+      alert('Mode demo: Data donatur tidak dapat disimpan secara permanen. Fitur ini akan aktif setelah backend terintegrasi.');
+      return;
+    }
+    
+    setIsLoading(true);
     
     try {
-      const newDonor = await trpc.createDonor.mutate(donorFormData);
-      setDonors((prev: Donor[]) => [...prev, newDonor]);
-      setIsDonorDialogOpen(false);
-      setDonorFormData({
-        full_name: '',
-        email: null,
-        phone: null,
-        address: null,
-        user_id: null,
-      });
+      await trpc.createDonor.mutate(donorFormData);
+      setIsAddDonorDialogOpen(false);
+      resetDonorForm();
+      onDonationsUpdate(); // Refresh donors list
     } catch (error) {
       console.error('Failed to create donor:', error);
+      alert('Gagal menambah donatur. Silakan coba lagi.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
+  // Handle create donation
   const handleCreateDonation = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (backendStatus === 'error') {
+      alert('Mode demo: Data donasi tidak dapat disimpan secara permanen. Fitur ini akan aktif setelah backend terintegrasi.');
+      return;
+    }
+    
+    setIsLoading(true);
     
     try {
-      const newDonation = await trpc.createDonation.mutate(donationFormData);
-      setDonations((prev: Donation[]) => [...prev, newDonation]);
-      setIsDonationDialogOpen(false);
-      setDonationFormData({
-        donor_id: 0,
-        type: 'uang',
-        amount: null,
-        item_description: null,
-        item_quantity: null,
-        donation_date: new Date(),
-        notes: null,
-      });
+      await trpc.createDonation.mutate(donationFormData);
+      setIsAddDonationDialogOpen(false);
+      resetDonationForm();
+      loadDonations(); // Refresh donations
+      onDonationsUpdate(); // Refresh overall stats
     } catch (error) {
       console.error('Failed to create donation:', error);
+      alert('Gagal mencatat donasi. Silakan coba lagi.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  // Calculate statistics
+  const totalDonations = donations.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const cashDonations = donations.filter(d => d.type === 'uang').reduce((sum, d) => sum + (d.amount || 0), 0);
+  const itemDonations = donations.filter(d => d.type === 'barang').length;
 
+  // Get donor name by ID
   const getDonorName = (donorId: number) => {
     const donor = donors.find(d => d.id === donorId);
-    return donor?.full_name || 'Unknown Donor';
+    return donor ? donor.full_name : 'Donor tidak ditemukan';
   };
-
-  const calculateStats = () => {
-    const totalAmount = filteredDonations
-      .filter(d => d.type === 'uang' && d.amount)
-      .reduce((sum, d) => sum + (d.amount || 0), 0);
-    
-    const totalItems = filteredDonations
-      .filter(d => d.type === 'barang' && d.item_quantity)
-      .reduce((sum, d) => sum + (d.item_quantity || 0), 0);
-    
-    const uniqueDonors = new Set(filteredDonations.map(d => d.donor_id)).size;
-    
-    return { totalAmount, totalItems, uniqueDonors };
-  };
-
-  const stats = calculateStats();
-  const canManage = currentUser.role === 'admin' || currentUser.role === 'pengurus';
 
   return (
     <div className="space-y-6">
+      {/* Demo Mode Alert */}
+      {backendStatus === 'error' && (
+        <Alert className="bg-blue-50 border-blue-200">
+          <Zap className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            <strong>🚧 Mode Demo:</strong> Menampilkan data contoh donatur dan donasi. 
+            Perubahan data akan tersedia setelah backend terintegrasi.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold text-gray-900">💝 Manajemen Donasi</h2>
-          <p className="text-gray-600 mt-1">
-            Kelola donatur dan catatan donasi masuk
-          </p>
-        </div>
-        
-        {canManage && (
-          <div className="flex gap-2">
-            <Dialog open={isDonorDialogOpen} onOpenChange={setIsDonorDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">
-                  <User className="h-4 w-4 mr-2" />
-                  Tambah Donatur
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Tambah Donatur Baru</DialogTitle>
-                  <DialogDescription>
-                    Daftarkan donatur baru ke dalam sistem
-                  </DialogDescription>
-                </DialogHeader>
-                
-                <form onSubmit={handleCreateDonor}>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <div>
+              <CardTitle className="flex items-center space-x-2">
+                <Heart className="h-5 w-5 text-red-600" />
+                <span>💝 Manajemen Donasi</span>
+              </CardTitle>
+              <CardDescription>
+                Kelola donatur dan donasi yang masuk ke panti asuhan
+              </CardDescription>
+            </div>
+            <div className="flex space-x-2">
+              <Dialog open={isAddDonorDialogOpen} onOpenChange={setIsAddDonorDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <Users className="h-4 w-4 mr-2" />
+                    Tambah Donatur
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>➕ Tambah Donatur Baru</DialogTitle>
+                    <DialogDescription>
+                      Daftarkan donatur baru ke dalam sistem
+                      {backendStatus === 'error' && (
+                        <span className="block mt-2 text-amber-600">
+                          ⚠️ Mode demo: Data tidak akan tersimpan permanen
+                        </span>
+                      )}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateDonor} className="space-y-4">
+                    <div>
                       <Label htmlFor="donor_name">Nama Lengkap *</Label>
                       <Input
                         id="donor_name"
                         value={donorFormData.full_name}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setDonorFormData((prev: CreateDonorInput) => ({ 
-                            ...prev, 
-                            full_name: e.target.value 
-                          }))
+                          setDonorFormData((prev: CreateDonorInput) => ({ ...prev, full_name: e.target.value }))
                         }
                         required
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
                       <Label htmlFor="donor_email">Email</Label>
                       <Input
                         id="donor_email"
                         type="email"
                         value={donorFormData.email || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setDonorFormData((prev: CreateDonorInput) => ({ 
-                            ...prev, 
-                            email: e.target.value || null 
+                          setDonorFormData((prev: CreateDonorInput) => ({
+                            ...prev,
+                            email: e.target.value || null
                           }))
                         }
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
                       <Label htmlFor="donor_phone">Nomor Telepon</Label>
                       <Input
                         id="donor_phone"
                         value={donorFormData.phone || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setDonorFormData((prev: CreateDonorInput) => ({ 
-                            ...prev, 
-                            phone: e.target.value || null 
+                          setDonorFormData((prev: CreateDonorInput) => ({
+                            ...prev,
+                            phone: e.target.value || null
                           }))
                         }
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
                       <Label htmlFor="donor_address">Alamat</Label>
                       <Textarea
                         id="donor_address"
                         value={donorFormData.address || ''}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          setDonorFormData((prev: CreateDonorInput) => ({ 
-                            ...prev, 
-                            address: e.target.value || null 
+                          setDonorFormData((prev: CreateDonorInput) => ({
+                            ...prev,
+                            address: e.target.value || null
                           }))
                         }
                       />
                     </div>
-                  </div>
 
-                  <DialogFooter>
-                    <Button type="submit" disabled={isSubmitting}>
-                      {isSubmitting ? 'Menyimpan...' : 'Simpan Donatur'}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsAddDonorDialogOpen(false)}>
+                        Batal
+                      </Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? 'Menyimpan...' : 'Simpan'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
 
-            <Dialog open={isDonationDialogOpen} onOpenChange={setIsDonationDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Catat Donasi
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Catat Donasi Baru</DialogTitle>
-                  <DialogDescription>
-                    Tambahkan catatan donasi yang baru diterima
-                  </DialogDescription>
-                </DialogHeader>
-                
-                <form onSubmit={handleCreateDonation}>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
+              <Dialog open={isAddDonationDialogOpen} onOpenChange={setIsAddDonationDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Catat Donasi
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>📝 Catat Donasi Baru</DialogTitle>
+                    <DialogDescription>
+                      Catat donasi yang baru diterima
+                      {backendStatus === 'error' && (
+                        <span className="block mt-2 text-amber-600">
+                          ⚠️ Mode demo: Data tidak akan tersimpan permanen
+                        </span>
+                      )}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateDonation} className="space-y-4">
+                    <div>
                       <Label>Donatur *</Label>
                       <Select
                         value={donationFormData.donor_id > 0 ? donationFormData.donor_id.toString() : ''}
                         onValueChange={(value: string) =>
-                          setDonationFormData((prev: CreateDonationInput) => ({ 
-                            ...prev, 
-                            donor_id: parseInt(value) || 0
+                          setDonationFormData((prev: CreateDonationInput) => ({
+                            ...prev,
+                            donor_id: parseInt(value)
                           }))
                         }
-                        required
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Pilih donatur" />
                         </SelectTrigger>
                         <SelectContent>
-                          {donors.map(donor => (
+                          {donors.map((donor: Donor) => (
                             <SelectItem key={donor.id} value={donor.id.toString()}>
                               {donor.full_name}
                             </SelectItem>
@@ -334,19 +381,12 @@ export function DonationManagement({ currentUser }: DonationManagementProps) {
                       </Select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
                       <Label>Jenis Donasi *</Label>
                       <Select
                         value={donationFormData.type}
                         onValueChange={(value: DonationType) =>
-                          setDonationFormData((prev: CreateDonationInput) => ({ 
-                            ...prev, 
-                            type: value,
-                            // Reset fields when type changes
-                            amount: value === 'uang' ? prev.amount : null,
-                            item_description: value === 'barang' ? prev.item_description : null,
-                            item_quantity: value === 'barang' ? prev.item_quantity : null,
-                          }))
+                          setDonationFormData((prev: CreateDonationInput) => ({ ...prev, type: value }))
                         }
                       >
                         <SelectTrigger>
@@ -359,333 +399,259 @@ export function DonationManagement({ currentUser }: DonationManagementProps) {
                       </Select>
                     </div>
 
-                    {donationFormData.type === 'uang' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="amount">Jumlah (Rupiah) *</Label>
+                    {donationFormData.type === 'uang' ? (
+                      <div>
+                        <Label htmlFor="amount">Jumlah (Rp) *</Label>
                         <Input
                           id="amount"
                           type="number"
-                          min="1"
+                          min="0"
+                          step="1000"
                           value={donationFormData.amount || ''}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setDonationFormData((prev: CreateDonationInput) => ({ 
-                              ...prev, 
-                              amount: parseFloat(e.target.value) || null 
+                            setDonationFormData((prev: CreateDonationInput) => ({
+                              ...prev,
+                              amount: parseFloat(e.target.value) || null
                             }))
                           }
                           required
                         />
                       </div>
-                    )}
-
-                    {donationFormData.type === 'barang' && (
+                    ) : (
                       <>
-                        <div className="space-y-2">
+                        <div>
                           <Label htmlFor="item_description">Deskripsi Barang *</Label>
                           <Input
                             id="item_description"
                             value={donationFormData.item_description || ''}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setDonationFormData((prev: CreateDonationInput) => ({ 
-                                ...prev, 
-                                item_description: e.target.value || null 
+                              setDonationFormData((prev: CreateDonationInput) => ({
+                                ...prev,
+                                item_description: e.target.value || null
                               }))
                             }
-                            placeholder="Contoh: Beras, Pakaian anak, Buku tulis"
-                            required
+                            required={donationFormData.type === 'barang'}
                           />
                         </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="item_quantity">Jumlah/Kuantitas *</Label>
+                        <div>
+                          <Label htmlFor="item_quantity">Jumlah Barang</Label>
                           <Input
                             id="item_quantity"
                             type="number"
                             min="1"
                             value={donationFormData.item_quantity || ''}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setDonationFormData((prev: CreateDonationInput) => ({ 
-                                ...prev, 
-                                item_quantity: parseInt(e.target.value) || null 
+                              setDonationFormData((prev: CreateDonationInput) => ({
+                                ...prev,
+                                item_quantity: parseInt(e.target.value) || null
                               }))
                             }
-                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="estimated_value">Estimasi Nilai (Rp)</Label>
+                          <Input
+                            id="estimated_value"
+                            type="number"
+                            min="0"
+                            step="1000"
+                            value={donationFormData.amount || ''}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setDonationFormData((prev: CreateDonationInput) => ({
+                                ...prev,
+                                amount: parseFloat(e.target.value) || null
+                              }))
+                            }
                           />
                         </div>
                       </>
                     )}
 
-                    <div className="space-y-2">
+                    <div>
                       <Label>Tanggal Donasi *</Label>
                       <Popover>
                         <PopoverTrigger asChild>
-                          <Button variant="outline" className="w-full justify-start text-left font-normal">
+                          <Button
+                            variant="outline"
+                            className="w-full justify-start text-left font-normal"
+                          >
                             <CalendarIcon className="mr-2 h-4 w-4" />
-                            {format(donationFormData.donation_date, 'dd MMMM yyyy', { locale: id })}
+                            {format(donationFormData.donation_date, "dd MMMM yyyy", { locale: localeId })}
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
                             selected={donationFormData.donation_date}
-                            onSelect={(date: Date | undefined) =>
-                              date && setDonationFormData((prev: CreateDonationInput) => ({ 
-                                ...prev, 
-                                donation_date: date 
-                              }))
-                            }
+                            onSelect={(date: Date | undefined) => {
+                              if (date) {
+                                setDonationFormData((prev: CreateDonationInput) => ({ ...prev, donation_date: date }))
+                              }
+                            }}
+                            disabled={(date: Date) => date > new Date()}
                             initialFocus
                           />
                         </PopoverContent>
                       </Popover>
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
                       <Label htmlFor="donation_notes">Catatan</Label>
                       <Textarea
                         id="donation_notes"
                         value={donationFormData.notes || ''}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          setDonationFormData((prev: CreateDonationInput) => ({ 
-                            ...prev, 
-                            notes: e.target.value || null 
+                          setDonationFormData((prev: CreateDonationInput) => ({
+                            ...prev,
+                            notes: e.target.value || null
                           }))
                         }
-                        placeholder="Catatan tambahan tentang donasi"
                       />
                     </div>
-                  </div>
 
-                  <DialogFooter>
-                    <Button type="submit" disabled={isSubmitting}>
-                      {isSubmitting ? 'Menyimpan...' : 'Simpan Donasi'}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsAddDonationDialogOpen(false)}>
+                        Batal
+                      </Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? 'Menyimpan...' : 'Simpan'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        )}
-      </div>
-
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-green-50 border-green-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-600 text-sm font-medium">Total Donasi Uang</p>
-                <p className="text-lg font-bold text-green-900">
-                  {formatCurrency(stats.totalAmount)}
-                </p>
+        </CardHeader>
+        <CardContent>
+          {/* Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-green-600">
+                Rp {totalDonations.toLocaleString('id-ID')}
               </div>
-              <DollarSign className="h-8 w-8 text-green-500" />
+              <div className="text-sm text-green-600">Total Donasi Bulan Ini</div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-blue-50 border-blue-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-600 text-sm font-medium">Total Item Barang</p>
-                <p className="text-2xl font-bold text-blue-900">{stats.totalItems}</p>
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-blue-600">
+                Rp {cashDonations.toLocaleString('id-ID')}
               </div>
-              <Package className="h-8 w-8 text-blue-500" />
+              <div className="text-sm text-blue-600">💰 Donasi Uang</div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-purple-50 border-purple-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-purple-600 text-sm font-medium">Donatur Aktif</p>
-                <p className="text-2xl font-bold text-purple-900">{stats.uniqueDonors}</p>
-              </div>
-              <Heart className="h-8 w-8 text-purple-500" />
+            <div className="bg-purple-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-purple-600">{itemDonations}</div>
+              <div className="text-sm text-purple-600">📦 Donasi Barang</div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-orange-50 border-orange-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-orange-600 text-sm font-medium">Total Donasi</p>
-                <p className="text-2xl font-bold text-orange-900">{filteredDonations.length}</p>
-              </div>
-              <TrendingUp className="h-8 w-8 text-orange-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  placeholder="Cari nama donatur..."
-                  value={searchTerm}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            
-            <Select value={typeFilter} onValueChange={(value: 'all' | DonationType) => setTypeFilter(value)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Jenis</SelectItem>
-                <SelectItem value="uang">Donasi Uang</SelectItem>
-                <SelectItem value="barang">Donasi Barang</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="flex gap-2">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {format(startDate, 'dd/MM/yy')}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={startDate}
-                    onSelect={(date: Date | undefined) => date && setStartDate(date)}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-
-              <span className="text-gray-500 self-center">s/d</span>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {format(endDate, 'dd/MM/yy')}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={endDate}
-                    onSelect={(date: Date | undefined) => date && setEndDate(date)}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
+            <div className="bg-red-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-red-600">{donors.length}</div>
+              <div className="text-sm text-red-600">👥 Total Donatur</div>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* Main Content Tabs */}
       <Tabs defaultValue="donations" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="donations">📝 Riwayat Donasi</TabsTrigger>
-          <TabsTrigger value="donors">👥 Data Donatur</TabsTrigger>
+          <TabsTrigger value="donations" className="flex items-center space-x-2">
+            <Gift className="h-4 w-4" />
+            <span>Riwayat Donasi</span>
+          </TabsTrigger>
+          <TabsTrigger value="donors" className="flex items-center space-x-2">
+            <Users className="h-4 w-4" />
+            <span>Data Donatur</span>
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="donations">
-          {/* Donations List */}
-          {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <Card key={i} className="animate-pulse">
-                  <CardHeader>
-                    <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="h-3 bg-gray-200 rounded"></div>
-                      <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+        {/* Donations Tab */}
+        <TabsContent value="donations" className="space-y-4">
+          {/* Search and Filters */}
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="🔍 Cari donatur..."
+                value={searchTerm}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
             </div>
-          ) : filteredDonations.length === 0 ? (
+            
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-[180px]">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Jenis Donasi" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Jenis</SelectItem>
+                <SelectItem value="uang">💰 Uang</SelectItem>
+                <SelectItem value="barang">📦 Barang</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Donations List */}
+          {filteredDonations.length === 0 ? (
             <Card>
-              <CardContent className="pt-12 pb-12 text-center">
+              <CardContent className="py-12 text-center">
                 <Gift className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  {searchTerm || typeFilter !== 'all' 
-                    ? 'Tidak ada donasi yang sesuai filter'
-                    : 'Belum ada catatan donasi'
-                  }
-                </h3>
                 <p className="text-gray-500">
                   {searchTerm || typeFilter !== 'all' 
-                    ? 'Coba ubah kriteria pencarian atau filter'
-                    : canManage 
-                      ? 'Mulai dengan mencatat donasi pertama'
-                      : 'Catatan donasi akan muncul di sini'
+                    ? 'Tidak ada donasi yang sesuai dengan filter.'
+                    : (backendStatus === 'error' 
+                        ? 'Mode demo: Silakan refresh halaman untuk melihat data contoh.'
+                        : 'Belum ada donasi bulan ini.'
+                      )
                   }
                 </p>
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid gap-4">
               {filteredDonations.map((donation: Donation) => (
                 <Card key={donation.id} className="hover:shadow-md transition-shadow">
-                  <CardHeader className="pb-3">
+                  <CardContent className="p-4">
                     <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg">
-                        {getDonorName(donation.donor_id)}
-                      </CardTitle>
-                      <Badge 
-                        variant={donation.type === 'uang' ? 'default' : 'secondary'}
-                        className={donation.type === 'uang' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}
-                      >
-                        {donation.type === 'uang' ? '💰 Uang' : '📦 Barang'}
-                      </Badge>
-                    </div>
-                    <CardDescription>
-                      {format(donation.donation_date, 'dd MMMM yyyy', { locale: id })}
-                    </CardDescription>
-                  </CardHeader>
-                  
-                  <CardContent className="space-y-3">
-                    {donation.type === 'uang' && donation.amount && (
-                      <div className="text-2xl font-bold text-green-600">
-                        {formatCurrency(donation.amount)}
-                      </div>
-                    )}
-
-                    {donation.type === 'barang' && (
-                      <div className="space-y-1">
-                        <div className="font-medium text-blue-700">
-                          {donation.item_description}
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <h3 className="font-semibold">{getDonorName(donation.donor_id)}</h3>
+                          <Badge variant={donation.type === 'uang' ? 'default' : 'secondary'}>
+                            {donation.type === 'uang' ? '💰 Uang' : '📦 Barang'}
+                          </Badge>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          Jumlah: {donation.item_quantity} unit
+                        
+                        <div className="text-sm text-gray-600 space-y-1">
+                          <p>
+                            📅 {format(new Date(donation.donation_date), "dd MMMM yyyy", { locale: localeId })}
+                          </p>
+                          
+                          {donation.type === 'uang' ? (
+                            <p className="font-medium text-green-600">
+                              💰 Rp {donation.amount?.toLocaleString('id-ID') || '0'}
+                            </p>
+                          ) : (
+                            <div>
+                              <p>📦 {donation.item_description}</p>
+                              {donation.item_quantity && (
+                                <p>Jumlah: {donation.item_quantity}</p>
+                              )}
+                              {donation.amount && (
+                                <p className="text-green-600">
+                                  Estimasi nilai: Rp {donation.amount.toLocaleString('id-ID')}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          
+                          {donation.notes && (
+                            <p className="text-gray-500">💬 {donation.notes}</p>
+                          )}
                         </div>
                       </div>
-                    )}
-
-                    {donation.notes && (
-                      <div className="text-sm">
-                        <strong className="text-gray-700">Catatan:</strong>
-                        <p className="text-gray-600 text-xs mt-1 line-clamp-2">
-                          {donation.notes}
-                        </p>
+                      
+                      <div className="text-xs text-gray-400">
+                        Dicatat: {format(new Date(donation.created_at), "dd/MM HH:mm")}
                       </div>
-                    )}
-
-                    <div className="pt-3 border-t">
-                      <span className="text-xs text-gray-500">
-                        Dicatat: {format(donation.created_at, 'dd/MM/yyyy HH:mm')}
-                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -694,74 +660,70 @@ export function DonationManagement({ currentUser }: DonationManagementProps) {
           )}
         </TabsContent>
 
-        <TabsContent value="donors">
+        {/* Donors Tab */}
+        <TabsContent value="donors" className="space-y-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="🔍 Cari donatur..."
+              value={searchTerm}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
           {/* Donors List */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {donors.map((donor: Donor) => {
-              const donorDonations = donations.filter(d => d.donor_id === donor.id);
-              const totalAmount = donorDonations
-                .filter(d => d.type === 'uang' && d.amount)
-                .reduce((sum, d) => sum + (d.amount || 0), 0);
-              const totalItems = donorDonations
-                .filter(d => d.type === 'barang')
-                .length;
-
-              return (
+          {filteredDonors.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500">
+                  {searchTerm 
+                    ? 'Tidak ada donatur yang sesuai dengan pencarian.'
+                    : (backendStatus === 'error' 
+                        ? 'Mode demo: Silakan refresh halaman untuk melihat data contoh.'
+                        : 'Belum ada donatur terdaftar.'
+                      )
+                  }
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredDonors.map((donor: Donor) => (
                 <Card key={donor.id} className="hover:shadow-md transition-shadow">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center">
-                      <User className="h-5 w-5 mr-2 text-blue-500" />
-                      {donor.full_name}
-                    </CardTitle>
-                    <CardDescription>
-                      Terdaftar: {format(donor.created_at, 'dd MMMM yyyy', { locale: id })}
-                    </CardDescription>
-                  </CardHeader>
-                  
-                  <CardContent className="space-y-3">
-                    {donor.email && (
-                      <div className="text-sm text-gray-600">
-                        📧 {donor.email}
-                      </div>
-                    )}
-                    
-                    {donor.phone && (
-                      <div className="text-sm text-gray-600">
-                        📱 {donor.phone}
-                      </div>
-                    )}
-
-                    {donor.address && (
-                      <div className="text-sm text-gray-600">
-                        📍 {donor.address}
-                      </div>
-                    )}
-
-                    <div className="pt-3 border-t space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Total Donasi Uang:</span>
-                        <span className="font-medium text-green-600">
-                          {formatCurrency(totalAmount)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Donasi Barang:</span>
-                        <span className="font-medium text-blue-600">
-                          {totalItems} kali
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Total Donasi:</span>
-                        <span className="font-medium">
-                          {donorDonations.length} kali
-                        </span>
+                  <CardContent className="p-4">
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-lg">{donor.full_name}</h3>
+                      
+                      {donor.email && (
+                        <p className="text-sm text-gray-600">
+                          ✉️ {donor.email}
+                        </p>
+                      )}
+                      
+                      {donor.phone && (
+                        <p className="text-sm text-gray-600">
+                          📞 {donor.phone}
+                        </p>
+                      )}
+                      
+                      {donor.address && (
+                        <p className="text-sm text-gray-600">
+                          📍 {donor.address}
+                        </p>
+                      )}
+                      
+                      <div className="pt-2 text-xs text-gray-400">
+                        Terdaftar: {format(new Date(donor.created_at), "dd MMM yyyy", { locale: localeId })}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

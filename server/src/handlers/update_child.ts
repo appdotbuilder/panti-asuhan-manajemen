@@ -6,27 +6,24 @@ import { eq } from 'drizzle-orm';
 
 export const updateChild = async (input: UpdateChildInput): Promise<Child> => {
   try {
-    // Check if child exists
-    const existingChild = await db.select()
+    // First check if child exists
+    const existing = await db.select()
       .from(childrenTable)
       .where(eq(childrenTable.id, input.id))
       .execute();
 
-    if (existingChild.length === 0) {
+    if (existing.length === 0) {
       throw new Error(`Child with id ${input.id} not found`);
     }
 
-    // Build update data - only include fields that are provided
-    const updateData: Partial<typeof childrenTable.$inferInsert> = {
-      updated_at: new Date()
-    };
-
+    // Build update object with only provided fields
+    const updateData: any = {};
+    
     if (input.full_name !== undefined) {
       updateData.full_name = input.full_name;
     }
     if (input.birth_date !== undefined) {
-      // Convert Date to string for date column
-      updateData.birth_date = input.birth_date.toISOString().split('T')[0];
+      updateData.birth_date = input.birth_date;
     }
     if (input.gender !== undefined) {
       updateData.gender = input.gender;
@@ -47,14 +44,17 @@ export const updateChild = async (input: UpdateChildInput): Promise<Child> => {
       updateData.is_active = input.is_active;
     }
 
-    // Update child record
+    // Set updated_at timestamp
+    updateData.updated_at = new Date();
+
+    // Update the child record
     const result = await db.update(childrenTable)
       .set(updateData)
       .where(eq(childrenTable.id, input.id))
       .returning()
       .execute();
 
-    // Convert date string back to Date object for the return type
+    // Convert date fields from string to Date objects before returning
     const child = result[0];
     return {
       ...child,

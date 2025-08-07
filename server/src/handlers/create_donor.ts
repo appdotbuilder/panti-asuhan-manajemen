@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 
 export const createDonor = async (input: CreateDonorInput): Promise<Donor> => {
   try {
-    // If user_id is provided, verify the user exists
+    // Validate user_id exists if provided
     if (input.user_id) {
       const user = await db.select()
         .from(usersTable)
@@ -15,7 +15,7 @@ export const createDonor = async (input: CreateDonorInput): Promise<Donor> => {
         .execute();
       
       if (user.length === 0) {
-        throw new Error(`User with id ${input.user_id} not found`);
+        throw new Error(`User with id ${input.user_id} does not exist`);
       }
     }
 

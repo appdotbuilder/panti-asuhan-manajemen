@@ -6,23 +6,14 @@ import { usersTable } from '../db/schema';
 import { type CreateUserInput } from '../schema';
 import { createUser } from '../handlers/create_user';
 import { eq } from 'drizzle-orm';
-import { createHash } from 'crypto';
 
-// Test input with all required fields
 const testInput: CreateUserInput = {
   username: 'testuser',
   email: 'test@example.com',
   password: 'password123',
   full_name: 'Test User',
-  phone: '081234567890',
-  role: 'donatur'
-};
-
-// Helper function to verify password
-const verifyPassword = (password: string, hashedPassword: string): boolean => {
-  const [hash, salt] = hashedPassword.split(':');
-  const verifyHash = createHash('sha256').update(password + salt).digest('hex');
-  return hash === verifyHash;
+  phone: '+628123456789',
+  role: 'donatur',
 };
 
 describe('createUser', () => {
@@ -36,7 +27,7 @@ describe('createUser', () => {
     expect(result.username).toEqual('testuser');
     expect(result.email).toEqual('test@example.com');
     expect(result.full_name).toEqual('Test User');
-    expect(result.phone).toEqual('081234567890');
+    expect(result.phone).toEqual('+628123456789');
     expect(result.role).toEqual('donatur');
     expect(result.is_active).toEqual(true);
     expect(result.id).toBeDefined();
@@ -44,15 +35,18 @@ describe('createUser', () => {
     expect(result.updated_at).toBeNull();
 
     // Password should be hashed, not plain text
-    expect(result.password_hash).toBeDefined();
     expect(result.password_hash).not.toEqual('password123');
-    expect(result.password_hash).toContain(':'); // Contains salt separator
+    expect(result.password_hash.length).toBeGreaterThan(10);
+
+    // Verify password hash is valid using Bun's password verification
+    const isValidHash = await Bun.password.verify('password123', result.password_hash);
+    expect(isValidHash).toBe(true);
   });
 
   it('should save user to database', async () => {
     const result = await createUser(testInput);
 
-    // Query database to verify user was saved
+    // Query using proper drizzle syntax
     const users = await db.select()
       .from(usersTable)
       .where(eq(usersTable.id, result.id))
@@ -62,80 +56,70 @@ describe('createUser', () => {
     expect(users[0].username).toEqual('testuser');
     expect(users[0].email).toEqual('test@example.com');
     expect(users[0].full_name).toEqual('Test User');
-    expect(users[0].phone).toEqual('081234567890');
     expect(users[0].role).toEqual('donatur');
-    expect(users[0].is_active).toEqual(true);
+    expect(users[0].is_active).toBe(true);
     expect(users[0].created_at).toBeInstanceOf(Date);
-  });
 
-  it('should hash password correctly', async () => {
-    const result = await createUser(testInput);
-
-    // Verify password was hashed and can be verified
-    const isValidPassword = verifyPassword('password123', result.password_hash);
-    expect(isValidPassword).toBe(true);
-
-    // Verify wrong password fails
-    const isInvalidPassword = verifyPassword('wrongpassword', result.password_hash);
-    expect(isInvalidPassword).toBe(false);
+    // Verify stored password is hashed correctly
+    const isValidHash = await Bun.password.verify('password123', users[0].password_hash);
+    expect(isValidHash).toBe(true);
   });
 
   it('should create user with null phone', async () => {
-    const inputWithNullPhone: CreateUserInput = {
-      ...testInput,
-      phone: null
+    const inputWithoutPhone: CreateUserInput = {
+      username: 'testuser2',
+      email: 'test2@example.com',
+      password: 'password123',
+      full_name: 'Test User 2',
+      phone: null,
+      role: 'pengurus',
     };
 
-    const result = await createUser(inputWithNullPhone);
+    const result = await createUser(inputWithoutPhone);
 
     expect(result.phone).toBeNull();
-    expect(result.username).toEqual('testuser');
-    expect(result.email).toEqual('test@example.com');
+    expect(result.role).toEqual('pengurus');
   });
 
-  it('should create users with different roles', async () => {
+  it('should handle different user roles', async () => {
     const adminInput: CreateUserInput = {
-      ...testInput,
-      username: 'admin_user',
+      username: 'admin',
       email: 'admin@example.com',
-      role: 'admin'
+      password: 'adminpass123',
+      full_name: 'Admin User',
+      phone: '+628987654321',
+      role: 'admin',
     };
 
-    const pengurusInput: CreateUserInput = {
-      ...testInput,
-      username: 'pengurus_user',
-      email: 'pengurus@example.com',
-      role: 'pengurus'
-    };
+    const result = await createUser(adminInput);
 
-    const adminResult = await createUser(adminInput);
-    const pengurusResult = await createUser(pengurusInput);
-
-    expect(adminResult.role).toEqual('admin');
-    expect(pengurusResult.role).toEqual('pengurus');
+    expect(result.role).toEqual('admin');
+    expect(result.username).toEqual('admin');
   });
 
-  it('should generate unique password hashes for same password', async () => {
-    const input1: CreateUserInput = {
+  it('should reject duplicate usernames', async () => {
+    // Create first user
+    await createUser(testInput);
+
+    // Try to create another user with the same username
+    const duplicateInput: CreateUserInput = {
       ...testInput,
-      username: 'user1',
-      email: 'user1@example.com'
+      email: 'different@example.com',
     };
 
-    const input2: CreateUserInput = {
+    await expect(createUser(duplicateInput)).rejects.toThrow(/duplicate|unique/i);
+  });
+
+  it('should reject duplicate emails', async () => {
+    // Create first user
+    await createUser(testInput);
+
+    // Try to create another user with the same email
+    const duplicateInput: CreateUserInput = {
       ...testInput,
-      username: 'user2',
-      email: 'user2@example.com'
+      username: 'differentuser',
     };
 
-    const result1 = await createUser(input1);
-    const result2 = await createUser(input2);
-
-    // Same password should produce different hashes due to different salts
-    expect(result1.password_hash).not.toEqual(result2.password_hash);
-    
-    // But both should verify correctly
-    expect(verifyPassword('password123', result1.password_hash)).toBe(true);
-    expect(verifyPassword('password123', result2.password_hash)).toBe(true);
+    await expect(createUser(duplicateInput)).rejects.toThrow(/duplicate|unique/i);
   });
 });

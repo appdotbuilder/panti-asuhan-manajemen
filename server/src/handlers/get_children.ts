@@ -1,8 +1,8 @@
 
 import { db } from '../db';
 import { childrenTable } from '../db/schema';
-import { type Child } from '../schema';
 import { eq } from 'drizzle-orm';
+import { type Child } from '../schema';
 
 export const getChildren = async (): Promise<Child[]> => {
   try {
@@ -11,13 +11,13 @@ export const getChildren = async (): Promise<Child[]> => {
       .where(eq(childrenTable.is_active, true))
       .execute();
 
-    // Convert date strings to Date objects to match schema
+    // Convert birth_date string to Date object to match Zod schema
     return results.map(child => ({
       ...child,
-      birth_date: new Date(child.birth_date),
+      birth_date: new Date(child.birth_date)
     }));
   } catch (error) {
-    console.error('Failed to get children:', error);
+    console.error('Failed to fetch children:', error);
     throw error;
   }
 };

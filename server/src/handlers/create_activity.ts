@@ -5,6 +5,7 @@ import { type CreateActivityInput, type Activity } from '../schema';
 
 export const createActivity = async (input: CreateActivityInput): Promise<Activity> => {
   try {
+    // Insert activity record
     const result = await db.insert(activitiesTable)
       .values({
         title: input.title,
@@ -16,12 +17,19 @@ export const createActivity = async (input: CreateActivityInput): Promise<Activi
         participants: input.participants,
         photos: input.photos,
         created_by: input.created_by,
-        status: 'planned' // Default status
       })
       .returning()
       .execute();
 
-    return result[0];
+    const activity = result[0];
+    return {
+      ...activity,
+      // Convert dates to proper Date objects
+      scheduled_date: new Date(activity.scheduled_date),
+      end_date: activity.end_date ? new Date(activity.end_date) : null,
+      created_at: new Date(activity.created_at),
+      updated_at: activity.updated_at ? new Date(activity.updated_at) : null,
+    };
   } catch (error) {
     console.error('Activity creation failed:', error);
     throw error;

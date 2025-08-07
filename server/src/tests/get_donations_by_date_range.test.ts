@@ -3,319 +3,267 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
 import { donorsTable, donationsTable } from '../db/schema';
-import { type GetDonationsByDateRangeInput, type CreateDonorInput } from '../schema';
+import { type GetDonationsByDateRangeInput, type CreateDonorInput, type CreateDonationInput } from '../schema';
 import { getDonationsByDateRange } from '../handlers/get_donations_by_date_range';
-
-// Test data
-const testDonor: CreateDonorInput = {
-  full_name: 'John Doe',
-  email: 'john@example.com',
-  phone: '08123456789',
-  address: 'Jakarta',
-  user_id: null,
-};
-
-const testDonor2: CreateDonorInput = {
-  full_name: 'Jane Smith',
-  email: 'jane@example.com',
-  phone: '08198765432',
-  address: 'Bandung',
-  user_id: null,
-};
 
 describe('getDonationsByDateRange', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should get donations within date range', async () => {
-    // Create test donors
-    const [donor1, donor2] = await db.insert(donorsTable)
-      .values([testDonor, testDonor2])
+  it('should return donations within date range', async () => {
+    // Create test donor first
+    const testDonor: CreateDonorInput = {
+      full_name: 'Test Donor',
+      email: 'donor@test.com',
+      phone: '081234567890',
+      address: 'Test Address',
+      user_id: null,
+    };
+
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
       .returning()
       .execute();
+    const donor = donorResult[0];
 
-    // Create test donations with different dates (using string format for date columns)
+    // Create test donations with different dates
     const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const dayAfter = new Date(today);
-    dayAfter.setDate(dayAfter.getDate() + 2);
 
-    await db.insert(donationsTable).values([
+    const testDonations: CreateDonationInput[] = [
       {
-        donor_id: donor1.id,
+        donor_id: donor.id,
         type: 'uang',
-        amount: '100000.00',
-        donation_date: today.toISOString().split('T')[0], // Convert Date to string
-        notes: 'First donation',
+        amount: 100000,
+        item_description: null,
+        item_quantity: null,
+        donation_date: yesterday,
+        notes: 'Yesterday donation',
       },
       {
-        donor_id: donor2.id,
+        donor_id: donor.id,
+        type: 'uang',
+        amount: 200000,
+        item_description: null,
+        item_quantity: null,
+        donation_date: today,
+        notes: 'Today donation',
+      },
+      {
+        donor_id: donor.id,
         type: 'barang',
-        item_description: 'Rice',
-        item_quantity: 10,
-        donation_date: tomorrow.toISOString().split('T')[0], // Convert Date to string
-        notes: 'Second donation',
+        amount: null,
+        item_description: 'Test Item',
+        item_quantity: 5,
+        donation_date: tomorrow,
+        notes: 'Tomorrow donation',
       },
-      {
-        donor_id: donor1.id,
-        type: 'uang',
-        amount: '50000.00',
-        donation_date: dayAfter.toISOString().split('T')[0], // Convert Date to string
-        notes: 'Third donation - outside range',
-      }
-    ]).execute();
+    ];
 
-    // Test: Get donations for today and tomorrow only
+    // Insert donations with proper date and numeric conversion
+    for (const donation of testDonations) {
+      await db.insert(donationsTable)
+        .values({
+          ...donation,
+          amount: donation.amount?.toString() || null,
+          donation_date: donation.donation_date.toISOString().split('T')[0], // Convert Date to string
+        })
+        .execute();
+    }
+
+    // Test date range query
     const input: GetDonationsByDateRangeInput = {
-      start_date: today,
+      start_date: yesterday,
       end_date: tomorrow,
     };
 
-    const result = await getDonationsByDateRange(input);
+    const results = await getDonationsByDateRange(input);
 
-    // Should return 2 donations within the date range
-    expect(result).toHaveLength(2);
+    // Should return all three donations
+    expect(results).toHaveLength(3);
+    
+    // Verify numeric conversion
+    const moneyDonations = results.filter(d => d.type === 'uang');
+    expect(moneyDonations).toHaveLength(2);
+    moneyDonations.forEach(donation => {
+      expect(typeof donation.amount).toBe('number');
+      expect(donation.amount).toBeGreaterThan(0);
+    });
 
-    // Verify first donation
-    const firstDonation = result.find(d => d.notes === 'First donation');
-    expect(firstDonation).toBeDefined();
-    expect(firstDonation!.donor_id).toEqual(donor1.id);
-    expect(firstDonation!.type).toEqual('uang');
-    expect(firstDonation!.amount).toEqual(100000);
-    expect(typeof firstDonation!.amount).toEqual('number');
-    expect(firstDonation!.donation_date).toBeInstanceOf(Date);
-    expect(firstDonation!.donation_date.toISOString().split('T')[0]).toEqual(today.toISOString().split('T')[0]);
+    // Verify item donation
+    const itemDonation = results.find(d => d.type === 'barang');
+    expect(itemDonation).toBeDefined();
+    expect(itemDonation?.amount).toBeNull();
+    expect(itemDonation?.item_description).toBe('Test Item');
+    expect(itemDonation?.item_quantity).toBe(5);
 
-    // Verify second donation
-    const secondDonation = result.find(d => d.notes === 'Second donation');
-    expect(secondDonation).toBeDefined();
-    expect(secondDonation!.donor_id).toEqual(donor2.id);
-    expect(secondDonation!.type).toEqual('barang');
-    expect(secondDonation!.item_description).toEqual('Rice');
-    expect(secondDonation!.item_quantity).toEqual(10);
-    expect(secondDonation!.amount).toBeNull();
-    expect(secondDonation!.donation_date).toBeInstanceOf(Date);
-    expect(secondDonation!.donation_date.toISOString().split('T')[0]).toEqual(tomorrow.toISOString().split('T')[0]);
-
-    // Third donation should not be included (outside date range)
-    const thirdDonation = result.find(d => d.notes === 'Third donation - outside range');
-    expect(thirdDonation).toBeUndefined();
+    // Verify dates are returned as Date objects
+    results.forEach(donation => {
+      expect(donation.donation_date).toBeInstanceOf(Date);
+    });
   });
 
-  it('should filter donations by specific donor', async () => {
-    // Create test donors
-    const [donor1, donor2] = await db.insert(donorsTable)
-      .values([testDonor, testDonor2])
+  it('should filter donations by donor_id when provided', async () => {
+    // Create two test donors
+    const donor1Result = await db.insert(donorsTable)
+      .values({
+        full_name: 'Donor One',
+        email: 'donor1@test.com',
+        phone: null,
+        address: null,
+        user_id: null,
+      })
+      .returning()
+      .execute();
+    
+    const donor2Result = await db.insert(donorsTable)
+      .values({
+        full_name: 'Donor Two',
+        email: 'donor2@test.com',
+        phone: null,
+        address: null,
+        user_id: null,
+      })
       .returning()
       .execute();
 
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const donor1 = donor1Result[0];
+    const donor2 = donor2Result[0];
 
-    // Create donations from both donors
-    await db.insert(donationsTable).values([
-      {
+    const today = new Date();
+
+    // Create donations for both donors
+    await db.insert(donationsTable)
+      .values({
         donor_id: donor1.id,
         type: 'uang',
-        amount: '100000.00',
-        donation_date: todayStr,
+        amount: '100000',
+        item_description: null,
+        item_quantity: null,
+        donation_date: today.toISOString().split('T')[0],
         notes: 'Donor 1 donation',
-      },
-      {
+      })
+      .execute();
+
+    await db.insert(donationsTable)
+      .values({
         donor_id: donor2.id,
         type: 'uang',
-        amount: '200000.00',
-        donation_date: todayStr,
+        amount: '200000',
+        item_description: null,
+        item_quantity: null,
+        donation_date: today.toISOString().split('T')[0],
         notes: 'Donor 2 donation',
-      }
-    ]).execute();
+      })
+      .execute();
 
-    // Test: Get donations from donor1 only
+    // Query with donor filter
     const input: GetDonationsByDateRangeInput = {
       start_date: today,
       end_date: today,
       donor_id: donor1.id,
     };
 
-    const result = await getDonationsByDateRange(input);
+    const results = await getDonationsByDateRange(input);
 
-    // Should return only 1 donation from donor1
-    expect(result).toHaveLength(1);
-    expect(result[0].donor_id).toEqual(donor1.id);
-    expect(result[0].notes).toEqual('Donor 1 donation');
-    expect(result[0].amount).toEqual(100000);
+    // Should only return donations from donor1
+    expect(results).toHaveLength(1);
+    expect(results[0].donor_id).toBe(donor1.id);
+    expect(results[0].notes).toBe('Donor 1 donation');
+    expect(typeof results[0].amount).toBe('number');
+    expect(results[0].amount).toBe(100000);
+    expect(results[0].donation_date).toBeInstanceOf(Date);
   });
 
-  it('should return empty array when no donations found', async () => {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const input: GetDonationsByDateRangeInput = {
-      start_date: today,
-      end_date: tomorrow,
-    };
-
-    const result = await getDonationsByDateRange(input);
-
-    expect(result).toHaveLength(0);
-  });
-
-  it('should handle single-day date range', async () => {
+  it('should return empty array when no donations match criteria', async () => {
     // Create test donor
-    const [donor] = await db.insert(donorsTable)
-      .values([testDonor])
-      .returning()
-      .execute();
-
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    const todayStr = today.toISOString().split('T')[0];
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    // Create donations on different days
-    await db.insert(donationsTable).values([
-      {
-        donor_id: donor.id,
-        type: 'uang',
-        amount: '100000.00',
-        donation_date: yesterdayStr,
-        notes: 'Yesterday donation',
-      },
-      {
-        donor_id: donor.id,
-        type: 'uang',
-        amount: '200000.00',
-        donation_date: todayStr,
-        notes: 'Today donation',
-      }
-    ]).execute();
-
-    // Test: Get donations for today only
-    const input: GetDonationsByDateRangeInput = {
-      start_date: today,
-      end_date: today,
-    };
-
-    const result = await getDonationsByDateRange(input);
-
-    // Should return only today's donation
-    expect(result).toHaveLength(1);
-    expect(result[0].notes).toEqual('Today donation');
-    expect(result[0].donation_date.toISOString().split('T')[0]).toEqual(todayStr);
-  });
-
-  it('should verify donation data types', async () => {
-    // Create test donor
-    const [donor] = await db.insert(donorsTable)
-      .values([{
+    const donorResult = await db.insert(donorsTable)
+      .values({
         full_name: 'Test Donor',
-        email: 'test@donor.com',
-        phone: '08111222333',
-        address: 'Test Address',
+        email: 'donor@test.com',
+        phone: null,
+        address: null,
         user_id: null,
-      }])
+      })
       .returning()
       .execute();
 
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const futureDate = new Date(today);
+    futureDate.setDate(futureDate.getDate() + 10);
 
-    // Create donation
-    await db.insert(donationsTable).values([{
-      donor_id: donor.id,
-      type: 'uang',
-      amount: '500000.00',
-      donation_date: todayStr,
-      notes: 'Test donation',
-    }]).execute();
-
+    // Query for dates with no donations
     const input: GetDonationsByDateRangeInput = {
-      start_date: today,
-      end_date: today,
+      start_date: futureDate,
+      end_date: futureDate,
     };
 
-    const result = await getDonationsByDateRange(input);
-
-    expect(result).toHaveLength(1);
-    
-    const donation = result[0];
-    expect(donation.donor_id).toEqual(donor.id);
-    expect(typeof donation.amount).toEqual('number');
-    expect(donation.amount).toEqual(500000);
-    expect(donation.donation_date).toBeInstanceOf(Date);
-    expect(donation.created_at).toBeInstanceOf(Date);
-    expect(donation.type).toEqual('uang');
-    expect(donation.notes).toEqual('Test donation');
+    const results = await getDonationsByDateRange(input);
+    expect(results).toHaveLength(0);
   });
 
-  it('should handle null amount for item donations', async () => {
+  it('should handle date range boundaries correctly', async () => {
     // Create test donor
-    const [donor] = await db.insert(donorsTable)
-      .values([testDonor])
+    const donorResult = await db.insert(donorsTable)
+      .values({
+        full_name: 'Test Donor',
+        email: 'donor@test.com',
+        phone: null,
+        address: null,
+        user_id: null,
+      })
       .returning()
       .execute();
+    const donor = donorResult[0];
 
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const startDate = new Date('2024-01-01');
+    const endDate = new Date('2024-01-31');
+    const beforeRange = new Date('2023-12-31');
+    const afterRange = new Date('2024-02-01');
 
-    // Create item donation without amount
-    await db.insert(donationsTable).values([{
-      donor_id: donor.id,
-      type: 'barang',
-      item_description: 'Books',
-      item_quantity: 20,
-      donation_date: todayStr,
-      notes: 'Book donation',
-    }]).execute();
+    // Create donations: one before range, two within range, one after range
+    const donations = [
+      { date: beforeRange, amount: '50000', notes: 'Before range' },
+      { date: startDate, amount: '100000', notes: 'Start date' },
+      { date: endDate, amount: '150000', notes: 'End date' },
+      { date: afterRange, amount: '200000', notes: 'After range' },
+    ];
 
-    const input: GetDonationsByDateRangeInput = {
-      start_date: today,
-      end_date: today,
-    };
-
-    const result = await getDonationsByDateRange(input);
-
-    expect(result).toHaveLength(1);
-    expect(result[0].type).toEqual('barang');
-    expect(result[0].amount).toBeNull();
-    expect(result[0].item_description).toEqual('Books');
-    expect(result[0].item_quantity).toEqual(20);
-  });
-
-  it('should handle edge case with no donor_id filter', async () => {
-    // Create test donor
-    const [donor] = await db.insert(donorsTable)
-      .values([testDonor])
-      .returning()
-      .execute();
-
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-
-    // Create donation
-    await db.insert(donationsTable).values([{
-      donor_id: donor.id,
-      type: 'uang',
-      amount: '300000.00',
-      donation_date: todayStr,
-      notes: 'No filter test',
-    }]).execute();
+    for (const donation of donations) {
+      await db.insert(donationsTable)
+        .values({
+          donor_id: donor.id,
+          type: 'uang',
+          amount: donation.amount,
+          item_description: null,
+          item_quantity: null,
+          donation_date: donation.date.toISOString().split('T')[0],
+          notes: donation.notes,
+        })
+        .execute();
+    }
 
     const input: GetDonationsByDateRangeInput = {
-      start_date: today,
-      end_date: today,
-      // donor_id is undefined - should include all donors
+      start_date: startDate,
+      end_date: endDate,
     };
 
-    const result = await getDonationsByDateRange(input);
+    const results = await getDonationsByDateRange(input);
 
-    expect(result).toHaveLength(1);
-    expect(result[0].donor_id).toEqual(donor.id);
-    expect(result[0].amount).toEqual(300000);
-    expect(result[0].notes).toEqual('No filter test');
+    // Should return only donations within range (inclusive boundaries)
+    expect(results).toHaveLength(2);
+    const notes = results.map(r => r.notes);
+    expect(notes).toContain('Start date');
+    expect(notes).toContain('End date');
+    expect(notes).not.toContain('Before range');
+    expect(notes).not.toContain('After range');
+
+    // Verify dates are properly converted
+    results.forEach(donation => {
+      expect(donation.donation_date).toBeInstanceOf(Date);
+    });
   });
 });

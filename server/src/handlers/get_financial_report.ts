@@ -2,8 +2,8 @@
 import { db } from '../db';
 import { donationsTable, expensesTable } from '../db/schema';
 import { type GetDonationsByDateRangeInput } from '../schema';
-import { eq, gte, lte, and, sum } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
+import { between, eq, sum, and, gte, lte } from 'drizzle-orm';
+import { SQL } from 'drizzle-orm';
 
 export interface FinancialReport {
   period: string;
@@ -25,85 +25,81 @@ export interface FinancialReport {
 
 export const getFinancialReport = async (input: GetDonationsByDateRangeInput): Promise<FinancialReport> => {
   try {
-    const { start_date, end_date } = input;
+    const { start_date, end_date, donor_id } = input;
 
-    // Convert dates to ISO date strings for date columns
+    // Convert dates to strings for comparison with date columns
     const startDateStr = start_date.toISOString().split('T')[0];
     const endDateStr = end_date.toISOString().split('T')[0];
 
-    // Base date range condition
-    const dateCondition = and(
+    // Build date conditions
+    const dateConditions: SQL<unknown>[] = [
       gte(donationsTable.donation_date, startDateStr),
       lte(donationsTable.donation_date, endDateStr)
-    );
+    ];
 
-    const expenseDateCondition = and(
+    const expenseDateConditions: SQL<unknown>[] = [
       gte(expensesTable.expense_date, startDateStr),
       lte(expensesTable.expense_date, endDateStr)
-    );
+    ];
 
-    // Get total donations (only money donations have amounts)
-    const totalDonationsResult = await db.select({
-      total: sum(donationsTable.amount)
-    })
-    .from(donationsTable)
-    .where(and(
-      dateCondition,
+    // Add donor filter if provided
+    if (donor_id !== undefined) {
+      dateConditions.push(eq(donationsTable.donor_id, donor_id));
+    }
+
+    // Get total donations (money only)
+    const allDonationConditions = [
+      ...dateConditions,
       eq(donationsTable.type, 'uang')
-    ))
-    .execute();
+    ];
 
-    // Get donations by type
-    const donationsByTypeResult = await db.select({
-      type: donationsTable.type,
+    const donationsResult = await db.select({
       total: sum(donationsTable.amount)
     })
     .from(donationsTable)
-    .where(dateCondition)
-    .groupBy(donationsTable.type)
+    .where(and(...allDonationConditions))
     .execute();
+
+    const total_donations = parseFloat(donationsResult[0]?.total || '0');
+
+    // Get donations by type (money)
+    const moneyResult = await db.select({
+      total: sum(donationsTable.amount)
+    })
+    .from(donationsTable)
+    .where(and(...allDonationConditions))
+    .execute();
+
+    const money_donations = parseFloat(moneyResult[0]?.total || '0');
+
+    // Get item donations count (we can't sum amounts for items, so we count items)
+    const itemConditions = [
+      ...dateConditions,
+      eq(donationsTable.type, 'barang')
+    ];
+
+    const itemResult = await db.select({
+      total: sum(donationsTable.item_quantity)
+    })
+    .from(donationsTable)
+    .where(and(...itemConditions))
+    .execute();
+
+    const item_donations = parseInt(itemResult[0]?.total || '0');
 
     // Get total expenses
-    const totalExpensesResult = await db.select({
+    const expensesResult = await db.select({
       total: sum(expensesTable.amount)
     })
     .from(expensesTable)
-    .where(expenseDateCondition)
+    .where(and(...expenseDateConditions))
     .execute();
+
+    const total_expenses = parseFloat(expensesResult[0]?.total || '0');
 
     // Get expenses by category
-    const expensesByCategoryResult = await db.select({
-      category: expensesTable.category,
-      total: sum(expensesTable.amount)
-    })
-    .from(expensesTable)
-    .where(expenseDateCondition)
-    .groupBy(expensesTable.category)
-    .execute();
-
-    // Process results and handle numeric conversions
-    const totalDonations = totalDonationsResult[0]?.total ? parseFloat(totalDonationsResult[0].total) : 0;
-    const totalExpenses = totalExpensesResult[0]?.total ? parseFloat(totalExpensesResult[0].total) : 0;
-
-    // Initialize donations by type
-    const donationsByType = {
-      uang: 0,
-      barang: 0,
-    };
-
-    // Process donations by type
-    donationsByTypeResult.forEach(result => {
-      if (result.type === 'uang' && result.total) {
-        donationsByType.uang = parseFloat(result.total);
-      } else if (result.type === 'barang') {
-        // For barang donations, we could count quantity or just mark as received
-        // Since amount is null for barang, we'll keep it as 0 for monetary calculations
-        donationsByType.barang = 0;
-      }
-    });
-
-    // Initialize expenses by category
-    const expensesByCategory = {
+    const expenseCategories = ['makanan', 'pendidikan', 'kesehatan', 'operasional', 'lainnya'] as const;
+    const expenses_by_category = {
       makanan: 0,
       pendidikan: 0,
       kesehatan: 0,
@@ -111,20 +107,35 @@ export const getFinancialReport = async (input: GetDonationsByDateRangeInput): P
       lainnya: 0,
     };
 
-    // Process expenses by category
-    expensesByCategoryResult.forEach(result => {
-      if (result.total) {
-        expensesByCategory[result.category as keyof typeof expensesByCategory] = parseFloat(result.total);
-      }
-    });
+    for (const category of expenseCategories) {
+      const categoryConditions = [
+        ...expenseDateConditions,
+        eq(expensesTable.category, category)
+      ];
+
+      const categoryResult = await db.select({
+        total: sum(expensesTable.amount)
+      })
+      .from(expensesTable)
+      .where(and(...categoryConditions))
+      .execute();
+
+      expenses_by_category[category] = parseFloat(categoryResult[0]?.total || '0');
+    }
+
+    // Calculate balance
+    const balance = total_donations - total_expenses;
 
     return {
       period: `${startDateStr} - ${endDateStr}`,
-      total_donations: totalDonations,
-      total_expenses: totalExpenses,
-      balance: totalDonations - totalExpenses,
-      donations_by_type: donationsByType,
-      expenses_by_category: expensesByCategory,
+      total_donations,
+      total_expenses,
+      balance,
+      donations_by_type: {
+        uang: money_donations,
+        barang: item_donations,
+      },
+      expenses_by_category,
     };
   } catch (error) {
     console.error('Financial report generation failed:', error);

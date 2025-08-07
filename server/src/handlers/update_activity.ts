@@ -6,19 +6,19 @@ import { eq } from 'drizzle-orm';
 
 export const updateActivity = async (input: UpdateActivityInput): Promise<Activity> => {
   try {
-    // First verify the activity exists
-    const existing = await db.select()
+    // Check if activity exists
+    const existingActivity = await db.select()
       .from(activitiesTable)
       .where(eq(activitiesTable.id, input.id))
       .execute();
 
-    if (existing.length === 0) {
-      throw new Error('Activity not found');
+    if (existingActivity.length === 0) {
+      throw new Error(`Activity with id ${input.id} not found`);
     }
 
-    // Build update object with only provided fields
+    // Prepare update data
     const updateData: any = {
-      updated_at: new Date()
+      updated_at: new Date(),
     };
 
     if (input.title !== undefined) updateData.title = input.title;
@@ -31,7 +31,7 @@ export const updateActivity = async (input: UpdateActivityInput): Promise<Activi
     if (input.photos !== undefined) updateData.photos = input.photos;
     if (input.status !== undefined) updateData.status = input.status;
 
-    // Update the activity
+    // Update activity
     const result = await db.update(activitiesTable)
       .set(updateData)
       .where(eq(activitiesTable.id, input.id))

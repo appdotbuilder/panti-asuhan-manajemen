@@ -11,81 +11,97 @@ import { eq } from 'drizzle-orm';
 const testDonor = {
   full_name: 'Test Donor',
   email: 'donor@test.com',
-  phone: '123456789',
+  phone: '08123456789',
   address: 'Test Address',
   user_id: null
 };
 
-// Test donation inputs
+// Test input for money donation
 const moneyDonationInput: CreateDonationInput = {
-  donor_id: 1, // Will be set after donor creation
+  donor_id: 1, // Will be set after creating donor
   type: 'uang',
   amount: 500000,
   item_description: null,
   item_quantity: null,
   donation_date: new Date('2024-01-15'),
-  notes: 'Monthly donation'
+  notes: 'Test money donation'
 };
 
+// Test input for goods donation
 const goodsDonationInput: CreateDonationInput = {
-  donor_id: 1, // Will be set after donor creation
+  donor_id: 1, // Will be set after creating donor
   type: 'barang',
   amount: null,
-  item_description: 'Rice bags',
-  item_quantity: 10,
-  donation_date: new Date('2024-01-15'),
-  notes: 'Food donation'
+  item_description: 'Buku pelajaran',
+  item_quantity: 20,
+  donation_date: new Date('2024-01-16'),
+  notes: 'Test goods donation'
 };
 
 describe('createDonation', () => {
-  beforeEach(async () => {
-    await createDB();
-    
-    // Create test donor
-    const donor = await db.insert(donorsTable)
+  beforeEach(createDB);
+  afterEach(resetDB);
+
+  it('should create a money donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
       .values(testDonor)
       .returning()
       .execute();
     
-    moneyDonationInput.donor_id = donor[0].id;
-    goodsDonationInput.donor_id = donor[0].id;
-  });
-  
-  afterEach(resetDB);
+    const donor = donorResult[0];
+    const input = { ...moneyDonationInput, donor_id: donor.id };
 
-  it('should create a money donation', async () => {
-    const result = await createDonation(moneyDonationInput);
+    const result = await createDonation(input);
 
     // Basic field validation
-    expect(result.donor_id).toEqual(moneyDonationInput.donor_id);
+    expect(result.donor_id).toEqual(donor.id);
     expect(result.type).toEqual('uang');
     expect(result.amount).toEqual(500000);
-    expect(typeof result.amount).toEqual('number'); // Ensure numeric conversion
+    expect(typeof result.amount).toEqual('number');
     expect(result.item_description).toBeNull();
     expect(result.item_quantity).toBeNull();
-    expect(result.donation_date).toEqual(moneyDonationInput.donation_date);
-    expect(result.notes).toEqual('Monthly donation');
+    expect(result.donation_date).toEqual(new Date('2024-01-15'));
+    expect(result.notes).toEqual('Test money donation');
     expect(result.id).toBeDefined();
     expect(result.created_at).toBeInstanceOf(Date);
   });
 
   it('should create a goods donation', async () => {
-    const result = await createDonation(goodsDonationInput);
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { ...goodsDonationInput, donor_id: donor.id };
+
+    const result = await createDonation(input);
 
     // Basic field validation
-    expect(result.donor_id).toEqual(goodsDonationInput.donor_id);
+    expect(result.donor_id).toEqual(donor.id);
     expect(result.type).toEqual('barang');
     expect(result.amount).toBeNull();
-    expect(result.item_description).toEqual('Rice bags');
-    expect(result.item_quantity).toEqual(10);
-    expect(result.donation_date).toEqual(goodsDonationInput.donation_date);
-    expect(result.notes).toEqual('Food donation');
+    expect(result.item_description).toEqual('Buku pelajaran');
+    expect(result.item_quantity).toEqual(20);
+    expect(result.donation_date).toEqual(new Date('2024-01-16'));
+    expect(result.notes).toEqual('Test goods donation');
     expect(result.id).toBeDefined();
     expect(result.created_at).toBeInstanceOf(Date);
   });
 
   it('should save donation to database', async () => {
-    const result = await createDonation(moneyDonationInput);
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { ...moneyDonationInput, donor_id: donor.id };
+
+    const result = await createDonation(input);
 
     // Query using proper drizzle syntax
     const donations = await db.select()
@@ -94,55 +110,107 @@ describe('createDonation', () => {
       .execute();
 
     expect(donations).toHaveLength(1);
-    expect(donations[0].donor_id).toEqual(moneyDonationInput.donor_id);
+    expect(donations[0].donor_id).toEqual(donor.id);
     expect(donations[0].type).toEqual('uang');
-    expect(parseFloat(donations[0].amount!)).toEqual(500000); // Convert string back to number for comparison
-    expect(new Date(donations[0].donation_date)).toEqual(moneyDonationInput.donation_date);
+    expect(parseFloat(donations[0].amount!)).toEqual(500000);
+    expect(new Date(donations[0].donation_date)).toEqual(new Date('2024-01-15'));
     expect(donations[0].created_at).toBeInstanceOf(Date);
   });
 
-  it('should throw error for non-existent donor', async () => {
-    const invalidInput = {
-      ...moneyDonationInput,
-      donor_id: 999 // Non-existent donor ID
-    };
+  it('should throw error when donor does not exist', async () => {
+    const input = { ...moneyDonationInput, donor_id: 999 };
 
-    await expect(createDonation(invalidInput)).rejects.toThrow(/donor not found/i);
+    await expect(() => createDonation(input))
+      .toThrow(/donor not found/i);
   });
 
-  it('should validate money donation requires amount', async () => {
-    const invalidInput = {
-      ...moneyDonationInput,
-      amount: null
+  it('should throw error when amount is missing for money donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { 
+      ...moneyDonationInput, 
+      donor_id: donor.id,
+      amount: null 
     };
 
-    await expect(createDonation(invalidInput)).rejects.toThrow(/amount is required.*money donations/i);
+    await expect(() => createDonation(input))
+      .toThrow(/amount is required for money donations/i);
   });
 
-  it('should validate money donation requires positive amount', async () => {
-    const invalidInput = {
-      ...moneyDonationInput,
-      amount: -100
+  it('should throw error when amount is zero for money donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { 
+      ...moneyDonationInput, 
+      donor_id: donor.id,
+      amount: 0 
     };
 
-    await expect(createDonation(invalidInput)).rejects.toThrow(/amount.*must be positive.*money donations/i);
+    await expect(() => createDonation(input))
+      .toThrow(/amount must be positive for money donations/i);
   });
 
-  it('should validate goods donation requires item description', async () => {
-    const invalidInput = {
-      ...goodsDonationInput,
-      item_description: null
+  it('should throw error when item description is missing for goods donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { 
+      ...goodsDonationInput, 
+      donor_id: donor.id,
+      item_description: null 
     };
 
-    await expect(createDonation(invalidInput)).rejects.toThrow(/item description.*required.*goods donations/i);
+    await expect(() => createDonation(input))
+      .toThrow(/item description is required for goods donations/i);
   });
 
-  it('should validate goods donation requires positive quantity', async () => {
-    const invalidInput = {
-      ...goodsDonationInput,
-      item_quantity: 0
+  it('should throw error when item quantity is missing for goods donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { 
+      ...goodsDonationInput, 
+      donor_id: donor.id,
+      item_quantity: null 
     };
 
-    await expect(createDonation(invalidInput)).rejects.toThrow(/positive quantity.*required.*goods donations/i);
+    await expect(() => createDonation(input))
+      .toThrow(/item quantity must be positive for goods donations/i);
+  });
+
+  it('should throw error when item quantity is zero for goods donation', async () => {
+    // Create prerequisite donor
+    const donorResult = await db.insert(donorsTable)
+      .values(testDonor)
+      .returning()
+      .execute();
+    
+    const donor = donorResult[0];
+    const input = { 
+      ...goodsDonationInput, 
+      donor_id: donor.id,
+      item_quantity: 0 
+    };
+
+    await expect(() => createDonation(input))
+      .toThrow(/item quantity must be positive for goods donations/i);
   });
 });

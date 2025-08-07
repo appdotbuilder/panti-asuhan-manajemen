@@ -1,163 +1,154 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   UserPlus, 
   Edit, 
-  Calendar as CalendarIcon, 
-  Search,
+  Trash2, 
+  Calendar as CalendarIcon,
   Users,
-  Baby,
-  GraduationCap,
-  Heart
+  Search,
+  Filter,
+  Download,
+  Zap
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { id } from 'date-fns/locale';
+import { id as localeId } from 'date-fns/locale';
 import { trpc } from '@/utils/trpc';
-import type { 
-  Child, 
-  CreateChildInput, 
-  UpdateChildInput, 
-  UserRole,
-  Gender,
-  EducationStatus
-} from '../../../server/src/schema';
+import type { Child, CreateChildInput, UpdateChildInput, Gender, EducationStatus } from '../../../server/src/schema';
 
 interface ChildrenManagementProps {
-  currentUser: {
-    id: number;
-    full_name: string;
-    role: UserRole;
-    email: string;
-  };
+  children: Child[];
+  onChildrenUpdate: () => void;
+  backendStatus: 'loading' | 'connected' | 'error';
 }
 
-export function ChildrenManagement({ currentUser }: ChildrenManagementProps) {
-  const [children, setChildren] = useState<Child[]>([]);
+export function ChildrenManagement({ children, onChildrenUpdate, backendStatus }: ChildrenManagementProps) {
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingChild, setEditingChild] = useState<Child | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [genderFilter, setGenderFilter] = useState<string>('all');
   const [educationFilter, setEducationFilter] = useState<string>('all');
 
-  // Form states
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingChild, setEditingChild] = useState<Child | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [createFormData, setCreateFormData] = useState<CreateChildInput>({
+  // Form state for creating/editing children
+  const [formData, setFormData] = useState<CreateChildInput>({
     full_name: '',
     birth_date: new Date(),
-    gender: 'laki-laki',
+    gender: 'laki-laki' as Gender,
     education_status: 'belum_sekolah',
     health_history: null,
     guardian_info: null,
     notes: null,
   });
 
-  const [editFormData, setEditFormData] = useState<Partial<UpdateChildInput>>({});
+  // Reset form data
+  const resetForm = useCallback(() => {
+    setFormData({
+      full_name: '',
+      birth_date: new Date(),
+      gender: 'laki-laki' as Gender,
+      education_status: 'belum_sekolah',
+      health_history: null,
+      guardian_info: null,
+      notes: null,
+    });
+  }, []);
 
-  const loadChildren = useCallback(async () => {
+  // Filter children based on search and filters
+  const filteredChildren = children.filter((child: Child) => {
+    const matchesSearch = child.full_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesGender = genderFilter === 'all' || child.gender === genderFilter;
+    const matchesEducation = educationFilter === 'all' || child.education_status === educationFilter;
+    
+    return matchesSearch && matchesGender && matchesEducation;
+  });
+
+  // Handle create child
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (backendStatus === 'error') {
+      alert('Mode demo: Data tidak dapat disimpan secara permanen. Fitur ini akan aktif setelah backend terintegrasi.');
+      return;
+    }
+    
+    setIsLoading(true);
+    
     try {
-      setIsLoading(true);
-      const result = await trpc.getChildren.query();
-      setChildren(result);
+      await trpc.createChild.mutate(formData);
+      setIsAddDialogOpen(false);
+      resetForm();
+      onChildrenUpdate();
     } catch (error) {
-      console.error('Failed to load children:', error);
+      console.error('Failed to create child:', error);
+      alert('Gagal menambah data anak asuh. Silakan coba lagi.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    loadChildren();
-  }, [loadChildren]);
-
-  // Filter children based on search and filters
-  const filteredChildren = children.filter(child => {
-    const matchesSearch = child.full_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || 
-      (statusFilter === 'active' && child.is_active) ||
-      (statusFilter === 'inactive' && !child.is_active);
-    const matchesEducation = educationFilter === 'all' || child.education_status === educationFilter;
-    
-    return matchesSearch && matchesStatus && matchesEducation;
-  });
-
-  const handleCreateChild = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    
-    try {
-      const newChild = await trpc.createChild.mutate(createFormData);
-      setChildren((prev: Child[]) => [...prev, newChild]);
-      setIsCreateDialogOpen(false);
-      setCreateFormData({
-        full_name: '',
-        birth_date: new Date(),
-        gender: 'laki-laki',
-        education_status: 'belum_sekolah',
-        health_history: null,
-        guardian_info: null,
-        notes: null,
-      });
-    } catch (error) {
-      console.error('Failed to create child:', error);
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
-  const handleEditChild = async (e: React.FormEvent) => {
+  // Handle edit child
+  const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingChild) return;
     
-    setIsSubmitting(true);
+    if (backendStatus === 'error') {
+      alert('Mode demo: Data tidak dapat diubah secara permanen. Fitur ini akan aktif setelah backend terintegrasi.');
+      return;
+    }
+
+    setIsLoading(true);
     
     try {
-      const updateData = {
+      const updateData: UpdateChildInput = {
         id: editingChild.id,
-        ...editFormData,
+        ...formData,
       };
       
-      const updatedChild = await trpc.updateChild.mutate(updateData);
-      setChildren((prev: Child[]) => 
-        prev.map(child => child.id === editingChild.id ? updatedChild : child)
-      );
-      setIsEditDialogOpen(false);
+      await trpc.updateChild.mutate(updateData);
       setEditingChild(null);
-      setEditFormData({});
+      resetForm();
+      onChildrenUpdate();
     } catch (error) {
       console.error('Failed to update child:', error);
+      alert('Gagal mengubah data anak asuh. Silakan coba lagi.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
-  const openEdit = (child: Child) => {
+  // Open edit dialog
+  const openEditDialog = (child: Child) => {
     setEditingChild(child);
-    setEditFormData({
+    setFormData({
       full_name: child.full_name,
-      birth_date: child.birth_date,
+      birth_date: new Date(child.birth_date),
       gender: child.gender,
       education_status: child.education_status,
       health_history: child.health_history,
       guardian_info: child.guardian_info,
       notes: child.notes,
-      is_active: child.is_active,
     });
-    setIsEditDialogOpen(true);
   };
 
+  // Close edit dialog
+  const closeEditDialog = () => {
+    setEditingChild(null);
+    resetForm();
+  };
+
+  // Calculate age
   const calculateAge = (birthDate: Date) => {
     const today = new Date();
     const birth = new Date(birthDate);
@@ -171,336 +162,300 @@ export function ChildrenManagement({ currentUser }: ChildrenManagementProps) {
     return age;
   };
 
-  const getEducationStatusLabel = (status: EducationStatus) => {
-    const labels: Record<EducationStatus, string> = {
-      
-      belum_sekolah: 'Belum Sekolah',
-      tk: 'TK',
-      sd: 'SD',
-      smp: 'SMP', 
-      sma: 'SMA',
-      kuliah: 'Kuliah',
-      lulus: 'Lulus'
-    };
-    return labels[status];
+  // Gender labels
+  const genderLabels = {
+    'laki-laki': '👦 Laki-laki',
+    'perempuan': '👧 Perempuan'
   };
 
-  const getGenderLabel = (gender: Gender) => {
-    return gender === 'laki-laki' ? 'Laki-laki' : 'Perempuan';
+  // Education status labels
+  const educationLabels = {
+    'belum_sekolah': '🏠 Belum Sekolah',
+    'tk': '🎨 TK',
+    'sd': '📚 SD',
+    'smp': '📖 SMP',
+    'sma': '🎓 SMA',
+    'kuliah': '🎓 Kuliah',
+    'lulus': '✅ Lulus'
   };
-
-  const getStatusBadge = (isActive: boolean) => {
-    return isActive ? (
-      <Badge className="bg-green-100 text-green-700 border-green-200">
-        ✅ Aktif
-      </Badge>
-    ) : (
-      <Badge variant="secondary" className="bg-gray-100 text-gray-700 border-gray-200">
-        ❌ Tidak Aktif
-      </Badge>
-    );
-  };
-
-  const canEdit = currentUser.role === 'admin' || currentUser.role === 'pengurus';
 
   return (
     <div className="space-y-6">
+      {/* Demo Mode Alert */}
+      {backendStatus === 'error' && (
+        <Alert className="bg-blue-50 border-blue-200">
+          <Zap className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            <strong>🚧 Mode Demo:</strong> Menampilkan data contoh anak asuh. 
+            Perubahan data akan tersedia setelah backend terintegrasi.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-bold text-gray-900">👶 Manajemen Anak Asuh</h2>
-          <p className="text-gray-600 mt-1">
-            Kelola data dan informasi anak-anak asuh di panti
-          </p>
-        </div>
-        
-        {canEdit && (
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700">
-                <UserPlus className="h-4 w-4 mr-2" />
-                Tambah Anak Asuh
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Tambah Anak Asuh Baru</DialogTitle>
-                <DialogDescription>
-                  Isi informasi lengkap anak asuh yang akan ditambahkan
-                </DialogDescription>
-              </DialogHeader>
-              
-              <form onSubmit={handleCreateChild}>
-                <div className="grid grid-cols-2 gap-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="full_name">Nama Lengkap *</Label>
-                    <Input
-                      id="full_name"
-                      value={createFormData.full_name}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ ...prev, full_name: e.target.value }))
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Tanggal Lahir *</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full justify-start text-left font-normal">
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {format(createFormData.birth_date, 'dd MMMM yyyy', { locale: id })}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={createFormData.birth_date}
-                          onSelect={(date: Date | undefined) =>
-                            date && setCreateFormData((prev: CreateChildInput) => ({ ...prev, birth_date: date }))
-                          }
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Jenis Kelamin *</Label>
-                    <Select
-                      value={createFormData.gender || 'laki-laki'}
-                      onValueChange={(value: Gender) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ ...prev, gender: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="laki-laki">Laki-laki</SelectItem>
-                        <SelectItem value="perempuan">Perempuan</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Status Pendidikan *</Label>
-                    <Select
-                      value={createFormData.education_status || 'belum_sekolah'}
-                      onValueChange={(value: EducationStatus) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ ...prev, education_status: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="belum_sekolah">Belum Sekolah</SelectItem>
-                        <SelectItem value="tk">TK</SelectItem>
-                        <SelectItem value="sd">SD</SelectItem>
-                        <SelectItem value="smp">SMP</SelectItem>
-                        <SelectItem value="sma">SMA</SelectItem>
-                        <SelectItem value="kuliah">Kuliah</SelectItem>
-                        <SelectItem value="lulus">Lulus</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="health_history">Riwayat Kesehatan</Label>
-                    <Textarea
-                      id="health_history"
-                      value={createFormData.health_history || ''}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ 
-                          ...prev, 
-                          health_history: e.target.value || null 
-                        }))
-                      }
-                      placeholder="Catatan kesehatan, alergi, riwayat penyakit..."
-                    />
-                  </div>
-
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="guardian_info">Informasi Wali</Label>
-                    <Textarea
-                      id="guardian_info"
-                      value={createFormData.guardian_info || ''}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ 
-                          ...prev, 
-                          guardian_info: e.target.value || null 
-                        }))
-                      }
-                      placeholder="Informasi keluarga, kontak darurat..."
-                    />
-                  </div>
-
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="notes">Catatan Tambahan</Label>
-                    <Textarea
-                      id="notes"
-                      value={createFormData.notes || ''}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setCreateFormData((prev: CreateChildInput) => ({ 
-                          ...prev, 
-                          notes: e.target.value || null 
-                        }))
-                      }
-                      placeholder="Catatan lainnya..."
-                    />
-                  </div>
-                </div>
-
-                <DialogFooter>
-                  <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-
-      {/* Filters */}
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  placeholder="Cari nama anak..."
-                  value={searchTerm}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <div>
+              <CardTitle className="flex items-center space-x-2">
+                <Users className="h-5 w-5 text-blue-600" />
+                <span>👨‍👩‍👧‍👦 Manajemen Anak Asuh</span>
+              </CardTitle>
+              <CardDescription>
+                Kelola data dan informasi anak-anak asuhan
+              </CardDescription>
+            </div>
+            <div className="flex space-x-2">
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Tambah Anak
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>➕ Tambah Anak Asuh Baru</DialogTitle>
+                    <DialogDescription>
+                      Isi formulir berikut untuk menambah anak asuh baru
+                      {backendStatus === 'error' && (
+                        <span className="block mt-2 text-amber-600">
+                          ⚠️ Mode demo: Data tidak akan tersimpan permanen
+                        </span>
+                      )}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleCreate} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="full_name">Nama Lengkap *</Label>
+                        <Input
+                          id="full_name"
+                          value={formData.full_name}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setFormData((prev: CreateChildInput) => ({ ...prev, full_name: e.target.value }))
+                          }
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label>Tanggal Lahir *</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start text-left font-normal"
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {format(formData.birth_date, "dd MMMM yyyy", { locale: localeId })}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={formData.birth_date}
+                              onSelect={(date: Date | undefined) => {
+                                if (date) {
+                                  setFormData((prev: CreateChildInput) => ({ ...prev, birth_date: date }))
+                                }
+                              }}
+                              disabled={(date: Date) => date > new Date() || date < new Date("1900-01-01")}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div>
+                        <Label>Jenis Kelamin *</Label>
+                        <Select
+                          value={formData.gender || 'laki-laki'}
+                          onValueChange={(value: Gender) =>
+                            setFormData((prev: CreateChildInput) => ({ ...prev, gender: value }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="laki-laki">👦 Laki-laki</SelectItem>
+                            <SelectItem value="perempuan">👧 Perempuan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label>Status Pendidikan *</Label>
+                        <Select
+                          value={formData.education_status || 'belum_sekolah'}
+                          onValueChange={(value: EducationStatus) =>
+                            setFormData((prev: CreateChildInput) => ({ ...prev, education_status: value }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="belum_sekolah">🏠 Belum Sekolah</SelectItem>
+                            <SelectItem value="tk">🎨 TK</SelectItem>
+                            <SelectItem value="sd">📚 SD</SelectItem>
+                            <SelectItem value="smp">📖 SMP</SelectItem>
+                            <SelectItem value="sma">🎓 SMA</SelectItem>
+                            <SelectItem value="kuliah">🎓 Kuliah</SelectItem>
+                            <SelectItem value="lulus">✅ Lulus</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="health_history">Riwayat Kesehatan</Label>
+                      <Textarea
+                        id="health_history"
+                        value={formData.health_history || ''}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          setFormData((prev: CreateChildInput) => ({
+                            ...prev,
+                            health_history: e.target.value || null
+                          }))
+                        }
+                        placeholder="Catatan kesehatan, alergi, atau kondisi khusus..."
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="guardian_info">Informasi Wali</Label>
+                      <Textarea
+                        id="guardian_info"
+                        value={formData.guardian_info || ''}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          setFormData((prev: CreateChildInput) => ({
+                            ...prev,
+                            guardian_info: e.target.value || null
+                          }))
+                        }
+                        placeholder="Informasi tentang wali atau keluarga..."
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="notes">Catatan Tambahan</Label>
+                      <Textarea
+                        id="notes"
+                        value={formData.notes || ''}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          setFormData((prev: CreateChildInput) => ({
+                            ...prev,
+                            notes: e.target.value || null
+                          }))
+                        }
+                        placeholder="Catatan lain tentang anak..."
+                      />
+                    </div>
+
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                        Batal
+                      </Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? 'Menyimpan...' : 'Simpan'}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* Search and Filters */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="🔍 Cari nama anak..."
+                value={searchTerm}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
             </div>
             
-            <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'inactive') => setStatusFilter(value)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Status</SelectItem>
-                <SelectItem value="active">Aktif</SelectItem>
-                <SelectItem value="inactive">Tidak Aktif</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Select value={genderFilter} onValueChange={setGenderFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Jenis Kelamin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Gender</SelectItem>
+                  <SelectItem value="laki-laki">👦 Laki-laki</SelectItem>
+                  <SelectItem value="perempuan">👧 Perempuan</SelectItem>
+                </SelectContent>
+              </Select>
 
-            <Select value={educationFilter} onValueChange={setEducationFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Pendidikan</SelectItem>
-                <SelectItem value="belum_sekolah">Belum Sekolah</SelectItem>
-                <SelectItem value="tk">TK</SelectItem>
-                <SelectItem value="sd">SD</SelectItem>
-                <SelectItem value="smp">SMP</SelectItem>
-                <SelectItem value="sma">SMA</SelectItem>
-                <SelectItem value="kuliah">Kuliah</SelectItem>
-                <SelectItem value="lulus">Lulus</SelectItem>
-              </SelectContent>
-            </Select>
+              <Select value={educationFilter} onValueChange={setEducationFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Pendidikan" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Tingkat</SelectItem>
+                  <SelectItem value="belum_sekolah">🏠 Belum Sekolah</SelectItem>
+                  <SelectItem value="tk">🎨 TK</SelectItem>
+                  <SelectItem value="sd">📚 SD</SelectItem>
+                  <SelectItem value="smp">📖 SMP</SelectItem>
+                  <SelectItem value="sma">🎓 SMA</SelectItem>
+                  <SelectItem value="kuliah">🎓 Kuliah</SelectItem>
+                  <SelectItem value="lulus">✅ Lulus</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-blue-600">{filteredChildren.length}</div>
+              <div className="text-sm text-blue-600">Total Ditampilkan</div>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-green-600">
+                {filteredChildren.filter(c => c.gender === 'laki-laki').length}
+              </div>
+              <div className="text-sm text-green-600">👦 Laki-laki</div>
+            </div>
+            <div className="bg-pink-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-pink-600">
+                {filteredChildren.filter(c => c.gender === 'perempuan').length}
+              </div>
+              <div className="text-sm text-pink-600">👧 Perempuan</div>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-purple-600">
+                {Math.round(filteredChildren.reduce((sum, child) => sum + calculateAge(child.birth_date), 0) / filteredChildren.length) || 0}
+              </div>
+              <div className="text-sm text-purple-600">Rata-rata Umur</div>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-blue-50 border-blue-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-600 text-sm font-medium">Total Anak</p>
-                <p className="text-2xl font-bold text-blue-900">{children.length}</p>
-              </div>
-              <Users className="h-8 w-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-green-50 border-green-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-600 text-sm font-medium">Anak Aktif</p>
-                <p className="text-2xl font-bold text-green-900">
-                  {children.filter(c => c.is_active).length}
-                </p>
-              </div>
-              <Heart className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-purple-50 border-purple-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-purple-600 text-sm font-medium">Laki-laki</p>
-                <p className="text-2xl font-bold text-purple-900">
-                  {children.filter(c => c.gender === 'laki-laki').length}
-                </p>
-              </div>
-              <Baby className="h-8 w-8 text-purple-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-pink-50 border-pink-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-pink-600 text-sm font-medium">Perempuan</p>
-                <p className="text-2xl font-bold text-pink-900">
-                  {children.filter(c => c.gender === 'perempuan').length}
-                </p>
-              </div>
-              <Baby className="h-8 w-8 text-pink-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Children List */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader>
-                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="h-3 bg-gray-200 rounded"></div>
-                  <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : filteredChildren.length === 0 ? (
+      {filteredChildren.length === 0 ? (
         <Card>
-          <CardContent className="pt-12 pb-12 text-center">
+          <CardContent className="py-12 text-center">
             <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              {searchTerm || statusFilter !== 'all' || educationFilter !== 'all' 
-                ? 'Tidak ada anak yang sesuai filter'
-                : 'Belum ada data anak asuh'
-              }
-            </h3>
             <p className="text-gray-500">
-              {searchTerm || statusFilter !== 'all' || educationFilter !== 'all' 
-                ? 'Coba ubah kriteria pencarian atau filter'
-                : canEdit 
-                  ? 'Mulai dengan menambahkan data anak asuh pertama'
-                  : 'Data anak asuh akan muncul di sini'
+              {searchTerm || genderFilter !== 'all' || educationFilter !== 'all' 
+                ? 'Tidak ada anak yang sesuai dengan filter.'
+                : (backendStatus === 'error' 
+                    ? 'Mode demo: Silakan refresh halaman untuk melihat data contoh.'
+                    : 'Belum ada data anak asuh. Tambah anak asuh pertama!'
+                  )
               }
             </p>
           </CardContent>
@@ -511,68 +466,84 @@ export function ChildrenManagement({ currentUser }: ChildrenManagementProps) {
             <Card key={child.id} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">
-                  <CardTitle className="text-lg">{child.full_name}</CardTitle>
-                  {getStatusBadge(child.is_active)}
+                  <div>
+                    <CardTitle className="text-lg">{child.full_name}</CardTitle>
+                    <CardDescription>
+                      {calculateAge(child.birth_date)} tahun • {genderLabels[child.gender]}
+                    </CardDescription>
+                  </div>
+                  <div className="flex space-x-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditDialog(child)}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="sm" className="text-red-600">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Hapus Data Anak</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {backendStatus === 'error' 
+                              ? `Mode demo: Fitur hapus data untuk ${child.full_name} akan tersedia setelah backend terintegrasi.`
+                              : `Apakah Anda yakin ingin menghapus data ${child.full_name}? Tindakan ini tidak dapat dibatalkan.`
+                            }
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Batal</AlertDialogCancel>
+                          <AlertDialogAction 
+                            className="bg-red-600 hover:bg-red-700"
+                            onClick={() => {
+                              if (backendStatus === 'error') {
+                                alert('Mode demo: Data tidak dapat dihapus secara permanen.');
+                              }
+                            }}
+                          >
+                            {backendStatus === 'error' ? 'OK' : 'Hapus'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </div>
-                <CardDescription>
-                  {getGenderLabel(child.gender)} • {calculateAge(child.birth_date)} tahun
-                </CardDescription>
               </CardHeader>
-              
               <CardContent className="space-y-3">
-                <div className="flex items-center text-sm text-gray-600">
-                  <GraduationCap className="h-4 w-4 mr-2" />
-                  {getEducationStatusLabel(child.education_status)}
+                <div>
+                  <p className="text-sm text-gray-600">Tanggal Lahir:</p>
+                  <p className="font-medium">
+                    {format(new Date(child.birth_date), "dd MMMM yyyy", { locale: localeId })}
+                  </p>
                 </div>
-                
-                <div className="flex items-center text-sm text-gray-600">
-                  <CalendarIcon className="h-4 w-4 mr-2" />
-                  {format(child.birth_date, 'dd MMMM yyyy', { locale: id })}
+
+                <div>
+                  <Badge variant="secondary">
+                    {educationLabels[child.education_status]}
+                  </Badge>
                 </div>
 
                 {child.health_history && (
-                  <div className="text-sm">
-                    <strong className="text-red-600">Kesehatan:</strong>
-                    <p className="text-gray-600 text-xs mt-1 line-clamp-2">
-                      {child.health_history}
-                    </p>
+                  <div>
+                    <p className="text-sm text-gray-600">Riwayat Kesehatan:</p>
+                    <p className="text-sm">{child.health_history}</p>
                   </div>
                 )}
 
                 {child.guardian_info && (
-                  <div className="text-sm">
-                    <strong className="text-blue-600">Wali:</strong>
-                    <p className="text-gray-600 text-xs mt-1 line-clamp-2">
-                      {child.guardian_info}
-                    </p>
+                  <div>
+                    <p className="text-sm text-gray-600">Info Wali:</p>
+                    <p className="text-sm">{child.guardian_info}</p>
                   </div>
                 )}
 
-                {child.notes && (
-                  <div className="text-sm">
-                    <strong className="text-gray-700">Catatan:</strong>
-                    <p className="text-gray-600 text-xs mt-1 line-clamp-2">
-                      {child.notes}
-                    </p>
-                  </div>
-                )}
-
-                <div className="pt-3 border-t flex justify-between items-center">
-                  <span className="text-xs text-gray-500">
-                    Terdaftar: {format(child.created_at, 'dd/MM/yyyy')}
-                  </span>
-                  
-                  {canEdit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEdit(child)}
-                      className="h-8"
-                    >
-                      <Edit className="h-3 w-3 mr-1" />
-                      Edit
-                    </Button>
-                  )}
+                <div className="pt-2 text-xs text-gray-500">
+                  Didaftarkan: {format(new Date(child.created_at), "dd MMM yyyy", { locale: localeId })}
                 </div>
               </CardContent>
             </Card>
@@ -581,188 +552,159 @@ export function ChildrenManagement({ currentUser }: ChildrenManagementProps) {
       )}
 
       {/* Edit Dialog */}
-      {editingChild && (
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Edit Data Anak Asuh</DialogTitle>
-              <DialogDescription>
-                Perbarui informasi untuk {editingChild.full_name}
-              </DialogDescription>
-            </DialogHeader>
-            
-            <form onSubmit={handleEditChild}>
-              <div className="grid grid-cols-2 gap-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit_full_name">Nama Lengkap *</Label>
-                  <Input
-                    id="edit_full_name"
-                    value={editFormData.full_name || ''}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        full_name: e.target.value 
-                      }))
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Tanggal Lahir *</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {editFormData.birth_date && format(editFormData.birth_date, 'dd MMMM yyyy', { locale: id })}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={editFormData.birth_date}
-                        onSelect={(date: Date | undefined) =>
-                          date && setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                            ...prev, 
-                            birth_date: date 
-                          }))
+      <Dialog open={editingChild !== null} onOpenChange={() => closeEditDialog()}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>✏️ Edit Data Anak Asuh</DialogTitle>
+            <DialogDescription>
+              Perbarui informasi {editingChild?.full_name}
+              {backendStatus === 'error' && (
+                <span className="block mt-2 text-amber-600">
+                  ⚠️ Mode demo: Perubahan tidak akan tersimpan permanen
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEdit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit_full_name">Nama Lengkap *</Label>
+                <Input
+                  id="edit_full_name"
+                  value={formData.full_name}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setFormData((prev: CreateChildInput) => ({ ...prev, full_name: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              
+              <div>
+                <Label>Tanggal Lahir *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(formData.birth_date, "dd MMMM yyyy", { locale: localeId })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={formData.birth_date}
+                      onSelect={(date: Date | undefined) => {
+                        if (date) {
+                          setFormData((prev: CreateChildInput) => ({ ...prev, birth_date: date }))
                         }
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Jenis Kelamin *</Label>
-                  <Select
-                    value={editFormData.gender || 'laki-laki'}
-                    onValueChange={(value: Gender) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        gender: value 
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="laki-laki">Laki-laki</SelectItem>
-                      <SelectItem value="perempuan">Perempuan</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Status Pendidikan *</Label>
-                  <Select
-                    value={editFormData.education_status || 'belum_sekolah'}
-                    onValueChange={(value: EducationStatus) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        education_status: value 
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="belum_sekolah">Belum Sekolah</SelectItem>
-                      <SelectItem value="tk">TK</SelectItem>
-                      <SelectItem value="sd">SD</SelectItem>
-                      <SelectItem value="smp">SMP</SelectItem>
-                      <SelectItem value="sma">SMA</SelectItem>
-                      <SelectItem value="kuliah">Kuliah</SelectItem>
-                      <SelectItem value="lulus">Lulus</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="col-span-2 space-y-2">
-                  <Label>Status Anak</Label>
-                  <Select
-                    value={editFormData.is_active !== undefined ? (editFormData.is_active ? 'true' : 'false') : 'true'}
-                    onValueChange={(value: string) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        is_active: value === 'true' 
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="true">Aktif</SelectItem>
-                      <SelectItem value="false">Tidak Aktif</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="edit_health_history">Riwayat Kesehatan</Label>
-                  <Textarea
-                    id="edit_health_history"
-                    value={editFormData.health_history || ''}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        health_history: e.target.value || null 
-                      }))
-                    }
-                    placeholder="Catatan kesehatan, alergi, riwayat penyakit..."
-                  />
-                </div>
-
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="edit_guardian_info">Informasi Wali</Label>
-                  <Textarea
-                    id="edit_guardian_info"
-                    value={editFormData.guardian_info || ''}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        guardian_info: e.target.value || null 
-                      }))
-                    }
-                    placeholder="Informasi keluarga, kontak darurat..."
-                  />
-                </div>
-
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="edit_notes">Catatan Tambahan</Label>
-                  <Textarea
-                    id="edit_notes"
-                    value={editFormData.notes || ''}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                      setEditFormData((prev: Partial<UpdateChildInput>) => ({ 
-                        ...prev, 
-                        notes: e.target.value || null 
-                      }))
-                    }
-                    placeholder="Catatan lainnya..."
-                  />
-                </div>
+                      }}
+                      disabled={(date: Date) => date > new Date() || date < new Date("1900-01-01")}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
-              <DialogFooter>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsEditDialogOpen(false)}
+              <div>
+                <Label>Jenis Kelamin *</Label>
+                <Select
+                  value={formData.gender || 'laki-laki'}
+                  onValueChange={(value: Gender) =>
+                    setFormData((prev: CreateChildInput) => ({ ...prev, gender: value }))
+                  }
                 >
-                  Batal
-                </Button>
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="laki-laki">👦 Laki-laki</SelectItem>
+                    <SelectItem value="perempuan">👧 Perempuan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Status Pendidikan *</Label>
+                <Select
+                  value={formData.education_status || 'belum_sekolah'}
+                  onValueChange={(value: EducationStatus) =>
+                    setFormData((prev: CreateChildInput) => ({ ...prev, education_status: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="belum_sekolah">🏠 Belum Sekolah</SelectItem>
+                    <SelectItem value="tk">🎨 TK</SelectItem>
+                    <SelectItem value="sd">📚 SD</SelectItem>
+                    <SelectItem value="smp">📖 SMP</SelectItem>
+                    <SelectItem value="sma">🎓 SMA</SelectItem>
+                    <SelectItem value="kuliah">🎓 Kuliah</SelectItem>
+                    <SelectItem value="lulus">✅ Lulus</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="edit_health_history">Riwayat Kesehatan</Label>
+              <Textarea
+                id="edit_health_history"
+                value={formData.health_history || ''}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setFormData((prev: CreateChildInput) => ({
+                    ...prev,
+                    health_history: e.target.value || null
+                  }))
+                }
+                placeholder="Catatan kesehatan, alergi, atau kondisi khusus..."
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit_guardian_info">Informasi Wali</Label>
+              <Textarea
+                id="edit_guardian_info"
+                value={formData.guardian_info || ''}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setFormData((prev: CreateChildInput) => ({
+                    ...prev,
+                    guardian_info: e.target.value || null
+                  }))
+                }
+                placeholder="Informasi tentang wali atau keluarga..."
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit_notes">Catatan Tambahan</Label>
+              <Textarea
+                id="edit_notes"
+                value={formData.notes || ''}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setFormData((prev: CreateChildInput) => ({
+                    ...prev,
+                    notes: e.target.value || null
+                  }))
+                }
+                placeholder="Catatan lain tentang anak..."
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeEditDialog}>
+                Batal
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Menyimpan...' : 'Simpan Perubahan'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

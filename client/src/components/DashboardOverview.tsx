@@ -1,388 +1,422 @@
 
-import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   Users, 
   Heart, 
-  Wallet, 
-  Calendar, 
-  TrendingUp,
-  Gift,
-  Plus
+  DollarSign, 
+  TrendingUp, 
+  Calendar,
+  Cake,
+  AlertCircle,
+  RefreshCw,
+  Zap
 } from 'lucide-react';
-import { trpc } from '@/utils/trpc';
-import type { Child, Donor, UserRole } from '../../../server/src/schema';
-import type { FinancialReport } from '../../../server/src/handlers/get_financial_report';
+import type { Child } from '../../../server/src/schema';
 
-interface DashboardOverviewProps {
-  currentUser: {
-    id: number;
-    full_name: string;
-    role: UserRole;
-    email: string;
+// Define FinancialReport interface locally since it's from handler
+interface FinancialReport {
+  period: string;
+  total_donations: number;
+  total_expenses: number;
+  balance: number;
+  donations_by_type: {
+    uang: number;
+    barang: number;
+  };
+  expenses_by_category: {
+    makanan: number;
+    pendidikan: number;
+    kesehatan: number;
+    operasional: number;
+    lainnya: number;
   };
 }
 
-export function DashboardOverview({ currentUser }: DashboardOverviewProps) {
-  const [children, setChildren] = useState<Child[]>([]);
-  const [donors, setDonors] = useState<Donor[]>([]);
-  const [financialReport, setFinancialReport] = useState<FinancialReport | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+interface DashboardOverviewProps {
+  stats: {
+    totalChildren: number;
+    totalDonors: number;
+    monthlyDonations: number;
+    monthlyExpenses: number;
+  };
+  financialReport: FinancialReport | null;
+  children: Child[];
+  onRefresh: () => void;
+  backendStatus: 'loading' | 'connected' | 'error';
+}
 
-  const loadDashboardData = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      
-      // Load children data
-      const childrenData = await trpc.getChildren.query();
-      setChildren(childrenData);
-
-      // Load donors data
-      const donorsData = await trpc.getDonors.query();
-      setDonors(donorsData);
-
-      // Load financial report for current month
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      
-      const reportData = await trpc.getFinancialReport.query({
-        start_date: startOfMonth,
-        end_date: endOfMonth,
-      });
-      setFinancialReport(reportData);
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
-
-  // Calculate stats
-  const activeChildren = children.filter(child => child.is_active).length;
-  const childrenByEducation = children.reduce((acc, child) => {
-    acc[child.education_status] = (acc[child.education_status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  // Upcoming birthdays (next 30 days)
+export function DashboardOverview({ stats, financialReport, children, onRefresh, backendStatus }: DashboardOverviewProps) {
+  // Calculate upcoming birthdays (next 30 days)
   const upcomingBirthdays = children.filter(child => {
     const today = new Date();
-    const birthday = new Date(child.birth_date);
-    birthday.setFullYear(today.getFullYear());
+    const nextMonth = new Date();
+    nextMonth.setDate(today.getDate() + 30);
     
-    const daysDiff = Math.ceil((birthday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    return daysDiff >= 0 && daysDiff <= 30;
+    const birthThisYear = new Date(today.getFullYear(), child.birth_date.getMonth(), child.birth_date.getDate());
+    const birthNextYear = new Date(today.getFullYear() + 1, child.birth_date.getMonth(), child.birth_date.getDate());
+    
+    return (birthThisYear >= today && birthThisYear <= nextMonth) || 
+           (birthNextYear >= today && birthNextYear <= nextMonth);
   });
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
-  const getEducationStatusLabel = (status: string) => {
-    const labels: Record<string, string> = {
-      belum_sekolah: 'Belum Sekolah',
-      tk: 'TK',
-      sd: 'SD',
-      smp: 'SMP',
-      sma: 'SMA',
-      kuliah: 'Kuliah',
-      lulus: 'Lulus'
-    };
-    return labels[status] || status;
-  };
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader className="pb-3">
-                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                <div className="h-8 bg-gray-300 rounded w-1/2"></div>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // Calculate balance percentage
+  const balancePercentage = stats.monthlyDonations > 0 
+    ? Math.min(100, (stats.monthlyDonations / (stats.monthlyDonations + stats.monthlyExpenses)) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
-      {/* Welcome Message */}
-      <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-6 text-white">
-        <h2 className="text-2xl font-bold mb-2">
-          Selamat Datang, {currentUser.full_name}! 👋
-        </h2>
-        <p className="text-blue-100">
-          {currentUser.role === 'admin' ? 
-            'Kelola semua aspek panti asuhan dari dashboard ini.' :
-            currentUser.role === 'pengurus' ?
-            'Pantau dan kelola data anak asuh, donasi, dan kegiatan hari ini.' :
-            'Lihat laporan donasi Anda dan kegiatan terbaru panti asuhan.'
-          }
-        </p>
+      {/* Welcome Section */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg p-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-2xl font-bold mb-2">
+              🌟 Selamat Datang di Dashboard Panti Asuhan
+            </h2>
+            <p className="text-indigo-100">
+              Kelola dan pantau seluruh kegiatan panti asuhan dalam satu tempat
+            </p>
+            {backendStatus === 'error' && (
+              <div className="mt-3 flex items-center space-x-2">
+                <Zap className="h-4 w-4 text-yellow-300" />
+                <span className="text-yellow-200 text-sm">
+                  Mode Demo: Menampilkan data contoh untuk demonstrasi
+                </span>
+              </div>
+            )}
+          </div>
+          <Button variant="secondary" onClick={onRefresh} className="flex items-center space-x-2">
+            <RefreshCw className="h-4 w-4" />
+            <span>Perbarui Data</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Key Statistics */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-blue-700">
-              <span>Anak Asuh Aktif</span>
-              <Users className="h-5 w-5" />
+        <Card className="border-blue-200 bg-blue-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-blue-700">
+              Total Anak Asuh
             </CardTitle>
-            <CardDescription className="text-xl font-bold text-blue-900">
-              {activeChildren} Anak
-            </CardDescription>
+            <Users className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-blue-600">
-              Total: {children.length} anak terdaftar
-            </div>
+            <div className="text-2xl font-bold text-blue-800">{stats.totalChildren}</div>
+            <p className="text-xs text-blue-600">
+              👶 Anak-anak yang diasuh saat ini
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-green-700">
-              <span>Total Donatur</span>
-              <Heart className="h-5 w-5" />
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-red-700">
+              Total Donatur
             </CardTitle>
-            <CardDescription className="text-xl font-bold text-green-900">
-              {donors.length} Donatur
-            </CardDescription>
+            <Heart className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-green-600">
-              Terima kasih untuk dukungannya! 🙏
-            </div>
+            <div className="text-2xl font-bold text-red-800">{stats.totalDonors}</div>
+            <p className="text-xs text-red-600">
+              💝 Orang yang telah berdonasi
+            </p>
           </CardContent>
         </Card>
 
-        {financialReport && (
-          <>
-            <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center justify-between text-purple-700">
-                  <span>Donasi Bulan Ini</span>
-                  <Gift className="h-5 w-5" />
-                </CardTitle>
-                <CardDescription className="text-xl font-bold text-purple-900">
-                  {formatCurrency(financialReport.total_donations)}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-purple-600">
-                  Uang: {formatCurrency(financialReport.donations_by_type.uang)}
-                </div>
-              </CardContent>
-            </Card>
+        <Card className="border-green-200 bg-green-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-green-700">
+              Donasi Bulan Ini
+            </CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-800">
+              Rp {stats.monthlyDonations.toLocaleString('id-ID')}
+            </div>
+            <p className="text-xs text-green-600">
+              📈 Total donasi yang diterima
+            </p>
+          </CardContent>
+        </Card>
 
-            <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center justify-between text-orange-700">
-                  <span>Pengeluaran</span>
-                  <Wallet className="h-5 w-5" />
-                </CardTitle>
-                <CardDescription className="text-xl font-bold text-orange-900">
-                  {formatCurrency(financialReport.total_expenses)}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-orange-600">
-                  Saldo: {formatCurrency(financialReport.balance)}
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
+        <Card className="border-orange-200 bg-orange-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-orange-700">
+              Pengeluaran Bulan Ini
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-800">
+              Rp {stats.monthlyExpenses.toLocaleString('id-ID')}
+            </div>
+            <p className="text-xs text-orange-600">
+              💸 Total pengeluaran operasional
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Additional Information */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Children Education Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Users className="h-5 w-5 mr-2 text-blue-600" />
-              Status Pendidikan Anak
-            </CardTitle>
-            <CardDescription>
-              Distribusi anak asuh berdasarkan status pendidikan
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {Object.entries(childrenByEducation).map(([status, count]) => (
-                <div key={status} className="flex justify-between items-center">
-                  <span className="text-sm font-medium">
-                    {getEducationStatusLabel(status)}
-                  </span>
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-                    {count} anak
-                  </Badge>
+      {/* Financial Overview */}
+      {financialReport && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <DollarSign className="h-5 w-5 text-green-600" />
+                <span>💰 Ringkasan Keuangan Bulan Ini</span>
+              </CardTitle>
+              <CardDescription>
+                Status keuangan dan distribusi pengeluaran
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Balance Progress */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium">Keseimbangan Keuangan</span>
+                  <span className="text-sm text-gray-600">{balancePercentage.toFixed(1)}%</span>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                <Progress value={balancePercentage} className="h-2" />
+                <p className="text-xs text-gray-500 mt-1">
+                  Perbandingan donasi terhadap total dana
+                </p>
+              </div>
 
+              {/* Balance Amount */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="text-center">
+                  <p className="text-sm text-gray-600">Saldo Bersih</p>
+                  <p className={`text-2xl font-bold ${financialReport.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    Rp {financialReport.balance.toLocaleString('id-ID')}
+                  </p>
+                  {financialReport.balance < 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      ⚠️ Pengeluaran melebihi donasi
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Donation Types */}
+              <div>
+                <p className="text-sm font-medium mb-2">Donasi per Jenis:</p>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm">💰 Uang</span>
+                    <span className="text-sm font-medium">
+                      Rp {financialReport.donations_by_type.uang.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">📦 Barang</span>
+                    <span className="text-sm font-medium">
+                      Rp {financialReport.donations_by_type.barang.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <DollarSign className="h-5 w-5 text-red-600" />
+                <span>📊 Distribusi Pengeluaran</span>
+              </CardTitle>
+              <CardDescription>
+                Kategori pengeluaran bulan ini
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(financialReport.expenses_by_category).map(([category, amount]) => {
+                  const percentage = stats.monthlyExpenses > 0 ? ((amount as number) / stats.monthlyExpenses) * 100 : 0;
+                  const categoryLabels = {
+                    makanan: '🍽️ Makanan',
+                    pendidikan: '📚 Pendidikan',
+                    kesehatan: '🏥 Kesehatan',
+                    operasional: '⚙️ Operasional',
+                    lainnya: '📝 Lainnya'
+                  };
+
+                  return (
+                    <div key={category} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span>{categoryLabels[category as keyof typeof categoryLabels]}</span>
+                        <span className="font-medium">
+                          Rp {(amount as number).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                      <Progress value={percentage} className="h-2" />
+                      <p className="text-xs text-gray-500">{percentage.toFixed(1)}% dari total</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Alerts and Notifications */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Upcoming Birthdays */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <Calendar className="h-5 w-5 mr-2 text-purple-600" />
-              Ulang Tahun Mendatang 🎂
+            <CardTitle className="flex items-center space-x-2">
+              <Cake className="h-5 w-5 text-pink-600" />
+              <span>🎂 Ulang Tahun Mendatang</span>
             </CardTitle>
             <CardDescription>
-              Anak-anak yang berulang tahun dalam 30 hari ke depan
+              Anak asuh yang berulang tahun dalam 30 hari ke depan
             </CardDescription>
           </CardHeader>
           <CardContent>
             {upcomingBirthdays.length === 0 ? (
-              <p className="text-gray-500 text-sm">Tidak ada ulang tahun dalam 30 hari ke depan</p>
+              <p className="text-gray-500 text-sm">
+                Tidak ada ulang tahun dalam 30 hari ke depan
+              </p>
             ) : (
               <div className="space-y-3">
-                {upcomingBirthdays.slice(0, 5).map((child) => {
-                  const birthday = new Date(child.birth_date);
-                  birthday.setFullYear(new Date().getFullYear());
+                {upcomingBirthdays.slice(0, 5).map((child: Child) => {
+                  const birthDate = new Date(child.birth_date);
+                  const thisYearBirth = new Date(new Date().getFullYear(), birthDate.getMonth(), birthDate.getDate());
                   
                   return (
-                    <div key={child.id} className="flex justify-between items-center">
+                    <div key={child.id} className="flex items-center justify-between p-2 bg-pink-50 rounded-lg">
                       <div>
                         <p className="font-medium text-sm">{child.full_name}</p>
-                        <p className="text-xs text-gray-500">
-                          {birthday.toLocaleDateString('id-ID', { 
+                        <p className="text-xs text-gray-600">
+                          {thisYearBirth.toLocaleDateString('id-ID', { 
                             day: 'numeric', 
                             month: 'long' 
                           })}
                         </p>
                       </div>
-                      <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                      <Badge variant="secondary" className="bg-pink-100 text-pink-800">
                         🎉
                       </Badge>
                     </div>
                   );
                 })}
                 {upcomingBirthdays.length > 5 && (
-                  <p className="text-xs text-gray-500 text-center pt-2">
-                    +{upcomingBirthdays.length - 5} lagi
+                  <p className="text-xs text-gray-500 text-center">
+                    +{upcomingBirthdays.length - 5} ulang tahun lainnya
                   </p>
                 )}
               </div>
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Financial Overview */}
-      {financialReport && currentUser.role !== 'donatur' && (
+        {/* System Alerts */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <TrendingUp className="h-5 w-5 mr-2 text-green-600" />
-              Ringkasan Keuangan Bulan Ini
+            <CardTitle className="flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              <span>⚠️ Pemberitahuan Sistem</span>
             </CardTitle>
             <CardDescription>
-              {financialReport.period}
+              Status sistem dan pengingat penting
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h4 className="font-semibold text-green-700 mb-3">💰 Pengeluaran per Kategori</h4>
-                <div className="space-y-2">
-                  {Object.entries(financialReport.expenses_by_category).map(([category, amount]) => (
-                    <div key={category} className="flex justify-between text-sm">
-                      <span className="capitalize">
-                        {category === 'makanan' ? '🍽️ Makanan' :
-                         category === 'pendidikan' ? '📚 Pendidikan' :
-                         category === 'kesehatan' ? '🏥 Kesehatan' :
-                         category === 'operasional' ? '⚙️ Operasional' :
-                         '📋 Lainnya'}
-                      </span>
-                      <span className="font-medium">{formatCurrency(amount)}</span>
+            <div className="space-y-3">
+              {/* Demo Mode Alert */}
+              {backendStatus === 'error' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <Zap className="h-4 w-4 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-blue-800">
+                        Mode Demo Aktif
+                      </p>
+                      <p className="text-xs text-blue-600">
+                        Menampilkan data contoh untuk demonstrasi fitur
+                      </p>
                     </div>
-                  ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div>
-                <h4 className="font-semibold text-blue-700 mb-3">🎁 Donasi per Jenis</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>💵 Donasi Uang</span>
-                    <span className="font-medium">
-                      {formatCurrency(financialReport.donations_by_type.uang)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>📦 Donasi Barang</span>
-                    <span className="font-medium">
-                      {financialReport.donations_by_type.barang} item
-                    </span>
+              {/* Financial Alert */}
+              {financialReport && financialReport.balance < 0 && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <AlertCircle className="h-4 w-4 text-red-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">
+                        Defisit Keuangan
+                      </p>
+                      <p className="text-xs text-red-600">
+                        Pengeluaran melebihi donasi bulan ini
+                      </p>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="mt-4 pt-4 border-t">
-                  <div className="flex justify-between font-semibold text-lg">
-                    <span className={financialReport.balance >= 0 ? 'text-green-600' : 'text-red-600'}>
-                      {financialReport.balance >= 0 ? '📈 Surplus' : '📉 Defisit'}
-                    </span>
-                    <span className={financialReport.balance >= 0 ? 'text-green-600' : 'text-red-600'}>
-                      {formatCurrency(Math.abs(financialReport.balance))}
-                    </span>
+              {/* Low donation alert */}
+              {stats.monthlyDonations < 1000000 && backendStatus !== 'error' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <Heart className="h-4 w-4 text-amber-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-800">
+                        Donasi Rendah
+                      </p>
+                      <p className="text-xs text-amber-600">
+                        Perlu meningkatkan upaya penggalangan dana
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {/* Positive message when no alerts */}
+              {(!financialReport || financialReport.balance >= 0) && stats.monthlyDonations >= 1000000 && backendStatus === 'connected' && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <div className="text-green-600 mt-0.5">✅</div>
+                    <div>
+                      <p className="text-sm font-medium text-green-800">
+                        Sistem Berjalan Lancar
+                      </p>
+                      <p className="text-xs text-green-600">
+                        Tidak ada peringatan saat ini
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Backup reminder */}
+              {backendStatus === 'connected' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <Calendar className="h-4 w-4 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-blue-800">
+                        Backup Data
+                      </p>
+                      <p className="text-xs text-blue-600">
+                        Jangan lupa backup data secara rutin
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {/* Quick Actions */}
-      {currentUser.role !== 'donatur' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>🚀 Aksi Cepat</CardTitle>
-            <CardDescription>
-              Tindakan yang sering dilakukan
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <button className="p-4 text-center border rounded-lg hover:bg-blue-50 hover:border-blue-200 transition-colors">
-                <Plus className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                <p className="text-sm font-medium">Tambah Anak</p>
-              </button>
-              <button className="p-4 text-center border rounded-lg hover:bg-green-50 hover:border-green-200 transition-colors">
-                <Gift className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                <p className="text-sm font-medium">Catat Donasi</p>
-              </button>
-              <button className="p-4 text-center border rounded-lg hover:bg-purple-50 hover:border-purple-200 transition-colors">
-                <Wallet className="h-6 w-6 mx-auto mb-2 text-purple-600" />
-                <p className="text-sm font-medium">Input Biaya</p>
-              </button>
-              <button className="p-4 text-center border rounded-lg hover:bg-orange-50 hover:border-orange-200 transition-colors">
-                <Calendar className="h-6 w-6 mx-auto mb-2 text-orange-600" />
-                <p className="text-sm font-medium">Buat Kegiatan</p>
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      </div>
     </div>
   );
 }
